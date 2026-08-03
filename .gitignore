@@ -14,3 +14,11 @@ sourcemap.json
 *.log
 *.tmp
 *.temp
+
+# Local-only references, authoring material, and private handoffs
+/.local-reference/
+/assets/
+/docs/
+/plugins/
+/vfx/
+/*.rbxmx

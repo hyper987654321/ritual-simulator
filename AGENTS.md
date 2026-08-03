@@ -219,20 +219,19 @@ When finishing a coding task, report:
 Be honest. Do not say something was tested, built, synced, or validated unless
 it actually was.
 
-## External Roblox Pipeline Boundary
+## Private Tooling Boundary
 
-This repository is the target Roblox product for an external local game
-pipeline. The pipeline may generate or stage approved product files, but its
-orchestration code, generator implementations, private prompts, credentials,
-and internal review history must remain outside this project.
+This repository contains the Roblox product only. Private orchestration,
+generator implementations, prompts, credentials, and internal review history
+must remain outside this project.
 
-- Rojo syncs this project's Luau source; the external pipeline is not a runtime
+- Rojo syncs this project's Luau source; private tooling is not a runtime
   dependency.
 - Treat `src/` and promoted `assets/` as product code/content that must remain
   understandable and reviewable to the game team.
-- Do not add pipeline scripts, generator recipes, private manifests, or
-  machine-local paths to this repository merely to automate an external step.
-- External handoffs must write only explicitly approved target paths and must
+- Do not add private scripts, generator recipes, manifests, or machine-local
+  paths to this repository merely to automate an external step.
+- Local handoffs must write only explicitly approved target paths and must
   preserve unrelated Studio-authored content.
 - Local file staging is the default. Roblox import, upload, publishing,
   production asset IDs, and place changes remain explicit human gates.

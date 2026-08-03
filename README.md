@@ -1,8 +1,8 @@
 # Ritual Simulator
 
-This repository contains the Roblox product project for Ritual Simulator. It
-is intentionally separate from the private `game-pipeline` orchestration
-repository and from the external asset-authoring repositories.
+This repository contains the Roblox product project for Ritual Simulator.
+Private orchestration and asset-authoring workspaces are kept outside the
+product repository.
 
 ## Local setup
 
@@ -34,18 +34,14 @@ dependencies or when setting up another machine, and review the resulting diff.
 
 ## Repository boundaries
 
-- `src/` — Rojo-synced Luau product code.
-- `assets/` — approved or locally staged product assets.
-- `vfx/` and root `.rbxmx` files — local Studio-authored references and review
-  material retained from the prototype.
-- `plugins/` — authoring-time Studio plugins.
-- `docs/` — product and authoring documentation.
-- `default.project.json` — Rojo mapping.
+- `src/` - Rojo-synced Luau product code.
+- `Packages/` - pinned runtime dependencies installed by Wally.
+- `default.project.json` - Rojo mapping.
 
-The external pipeline owns orchestration, private prompts, generator
-implementations, credentials, manifests, and internal review history. Do not
-copy those into this repository. Product code must remain understandable and
-reviewable without the pipeline.
+Local-only prototype references, authoring files, and imported source assets
+are kept in `.local-reference/`. That directory is ignored by Git and is not
+included by the Rojo mapping. Keep private production tooling and review
+material outside this repository.
 
 ## Development rules
 
