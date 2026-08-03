@@ -6,11 +6,21 @@ repository and from the external asset-authoring repositories.
 
 ## Local setup
 
-Run these commands from this repository root:
+The required tools are already installed on the current machine and the
+dependencies are already present in `Packages/`. You do not need to run the
+setup commands again for this checkout.
+
+For a fresh machine or fresh checkout, run these one-time setup commands from
+the repository root:
 
 ```powershell
 rokit install
 wally install
+```
+
+During normal development, start the live Rojo sync server:
+
+```powershell
 rojo serve default.project.json
 ```
 
@@ -19,8 +29,8 @@ The repository does not upload, publish, or assign production asset IDs.
 
 `rokit.toml` pins the expected Rojo, Wally, and package-type tool versions.
 `wally.lock` pins Lua dependencies. `Packages/` is included so the current
-prototype can be opened immediately; rerun `wally install` after dependency
-changes and review the resulting diff.
+prototype can be opened immediately; rerun `wally install` only after changing
+dependencies or when setting up another machine, and review the resulting diff.
 
 ## Repository boundaries
 
