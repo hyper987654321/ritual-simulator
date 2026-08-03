@@ -1,0 +1,8 @@
+# Roblox binary assets are stored as opaque files.
+*.rbxmx binary
+*.rbxl binary
+*.rbxlx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.wav binary

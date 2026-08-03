@@ -1,0 +1,592 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Packages = ReplicatedStorage:WaitForChild("Packages")
+local React = require(Packages:WaitForChild("React"))
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = Shared:WaitForChild("Config")
+local Util = Shared:WaitForChild("Util")
+
+local NumberFormatter = require(Util:WaitForChild("NumberFormatter"))
+local TutorialConfig = require(Config:WaitForChild("TutorialConfig"))
+local UIIconConfig = require(Config:WaitForChild("UIIconConfig"))
+local UIThemeConfig = require(Config:WaitForChild("UIThemeConfig"))
+local ZoneConfig = require(Config:WaitForChild("ZoneConfig"))
+
+local Systems = script.Parent.Parent.Parent
+local ClientUiSignals = require(Systems:WaitForChild("State"):WaitForChild("ClientUiSignals"))
+local ClientStateStore = require(Systems:WaitForChild("State"):WaitForChild("ClientStateStore"))
+
+local Components = script.Parent.Parent:WaitForChild("Components")
+local CommonComponents = Components:WaitForChild("Common")
+local HudComponents = Components:WaitForChild("Hud")
+local OverlayComponents = Components:WaitForChild("Overlays")
+
+local AscensionOverlay = require(OverlayComponents:WaitForChild("AscensionOverlay"))
+local HudIconBar = require(CommonComponents:WaitForChild("HudIconBar"))
+local ActiveBoostsDisplay = require(HudComponents:WaitForChild("ActiveBoostsDisplay"))
+local HudLayoutConfig = require(HudComponents:WaitForChild("HudLayoutConfig"))
+local HudPrimitives = require(CommonComponents:WaitForChild("HudPrimitives"))
+local PetInventoryOverlay = require(OverlayComponents:WaitForChild("PetInventoryOverlay"))
+local RebirthOverlay = require(OverlayComponents:WaitForChild("RebirthOverlay"))
+local RitualCoreOverlay = require(OverlayComponents:WaitForChild("RitualCoreOverlay"))
+local RitualRushOverlay = require(OverlayComponents:WaitForChild("RitualRushOverlay"))
+local RollScreenOverlay = require(HudComponents:WaitForChild("RollScreenOverlay"))
+local ShopOverlay = require(OverlayComponents:WaitForChild("ShopOverlay"))
+local TeleportOverlay = require(OverlayComponents:WaitForChild("TeleportOverlay"))
+local TutorialOverlay = require(HudComponents:WaitForChild("TutorialOverlay"))
+
+local Hooks = script.Parent.Parent:WaitForChild("Hooks")
+local useRollActions = require(Hooks:WaitForChild("useRollActions"))
+local useViewportSize = require(Hooks:WaitForChild("useViewportSize"))
+
+local PET_INVENTORY_OVERLAY_ID = "PetInventory"
+local SHOP_OVERLAY_ID = "Shop"
+local RITUAL_CORE_OVERLAY_ID = "RitualCore"
+local RITUAL_RUSH_OVERLAY_ID = "RitualRush"
+local REBIRTH_OVERLAY_ID = "Rebirth"
+local ASCENSION_OVERLAY_ID = "Ascension"
+local TELEPORT_OVERLAY_ID = "Teleport"
+
+local player = Players.LocalPlayer
+
+local function createCurrencyIcon(iconColor)
+	return React.createElement("ImageLabel", {
+		Active = false,
+		BackgroundTransparency = 1,
+		Image = UIIconConfig.getIcon("Essence") or "",
+		ImageColor3 = iconColor,
+		LayoutOrder = 1,
+		ScaleType = Enum.ScaleType.Fit,
+		Size = UDim2.fromOffset(HudLayoutConfig.CurrencyIconSize, HudLayoutConfig.CurrencyIconSize),
+		ZIndex = 59,
+	})
+end
+
+local function createCurrencyRow(iconColor, textColor, valueText, layoutOrder)
+	return React.createElement("Frame", {
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		LayoutOrder = layoutOrder,
+		Size = UDim2.new(1, 0, 0, HudLayoutConfig.CurrencyRowHeight),
+		ZIndex = 58,
+	}, {
+		Layout = React.createElement("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Left,
+			Padding = UDim.new(0, HudLayoutConfig.CurrencyDisplayGap),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+		}),
+		Icon = createCurrencyIcon(iconColor),
+		Value = HudPrimitives.createLabel(valueText, {
+			Font = UIThemeConfig.Font,
+			LayoutOrder = 2,
+			Size = UDim2.new(1, -HudLayoutConfig.CurrencyIconSize - HudLayoutConfig.CurrencyDisplayGap, 1, 0),
+			TextColor3 = textColor or Color3.fromRGB(255, 255, 255),
+			TextScaled = true,
+			TextSize = HudLayoutConfig.CurrencyTextSize,
+			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+			TextStrokeTransparency = 0.12,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 59,
+		}, {
+			TextSizeConstraint = React.createElement("UITextSizeConstraint", {
+				MaxTextSize = HudLayoutConfig.CurrencyTextSize,
+				MinTextSize = HudLayoutConfig.CurrencyMinTextSize,
+			}),
+		}),
+	})
+end
+
+local function getEssenceCapacityText(snapshot)
+	local stoneStats = if typeof(snapshot.StoneStats) == "table" then snapshot.StoneStats else {}
+	local capacity = if typeof(stoneStats.Capacity) == "number" then stoneStats.Capacity else 0
+
+	return string.format(
+		"%s / %s",
+		NumberFormatter.compact(snapshot.Essence or 0),
+		NumberFormatter.compact(capacity)
+	)
+end
+
+local function createCurrencyDisplay(snapshot, scale)
+	return React.createElement("Frame", {
+		AnchorPoint = HudLayoutConfig.CurrencyDisplayAnchor,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = HudLayoutConfig.CurrencyDisplayPosition,
+		Size = HudLayoutConfig.CurrencyDisplaySize,
+		ZIndex = 58,
+	}, {
+		Scale = React.createElement("UIScale", {
+			Scale = scale or 1,
+		}),
+		Layout = React.createElement("UIListLayout", {
+			FillDirection = Enum.FillDirection.Vertical,
+			HorizontalAlignment = Enum.HorizontalAlignment.Left,
+			Padding = UDim.new(0, HudLayoutConfig.CurrencyRowGap),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+		}),
+		Essence = createCurrencyRow(nil, nil, getEssenceCapacityText(snapshot), 1),
+		RitualGems = createCurrencyRow(
+			Color3.fromRGB(255, 74, 214),
+			Color3.fromRGB(255, 218, 92),
+			NumberFormatter.compact(snapshot.RitualGems or 0),
+			2
+		),
+	})
+end
+
+local function createStatsPanel(snapshot, zoneName)
+	local essenceText = string.format(
+		"%s / %s",
+		NumberFormatter.compact(snapshot.Essence),
+		NumberFormatter.compact(snapshot.StoneStats.Capacity)
+	)
+
+	return HudPrimitives.createPanel({
+		Position = UDim2.fromOffset(18, 18),
+		Size = UDim2.fromOffset(260, 218),
+	}, {
+		Padding = React.createElement("UIPadding", {
+			PaddingBottom = UDim.new(0, 12),
+			PaddingLeft = UDim.new(0, 14),
+			PaddingRight = UDim.new(0, 14),
+			PaddingTop = UDim.new(0, 12),
+		}),
+		Layout = React.createElement("UIListLayout", {
+			Padding = UDim.new(0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+		Title = HudPrimitives.createLabel("Ritual Core", {
+			Font = UIThemeConfig.Font,
+			LayoutOrder = 1,
+			Size = UDim2.new(1, 0, 0, 26),
+			TextSize = 20,
+		}),
+		Zone = HudPrimitives.createStatRow("Zone", zoneName, 2),
+		Essence = HudPrimitives.createStatRow("Essence", essenceText, 3),
+		Power = HudPrimitives.createStatRow("Ritual Power", NumberFormatter.compact(snapshot.RitualPower), 4),
+		Luck = HudPrimitives.createStatRow("Luck", NumberFormatter.decimal(snapshot.StoneStats.Luck, 2), 5),
+		Speed = HudPrimitives.createStatRow(
+			"Roll Opening Speed",
+			RollScreenOverlay.getRollAnimationPaceText(RollScreenOverlay.getRollAnimationDurationScale(snapshot)),
+			6
+		),
+		Rolls = HudPrimitives.createStatRow("Rolls", NumberFormatter.compact(snapshot.Rolls), 7),
+	})
+end
+
+local function HudApp()
+	local snapshot, setSnapshot = React.useState(ClientStateStore.getSnapshot())
+	local rollActions = useRollActions({
+		BuildRollRouletteTrack = RollScreenOverlay.buildRollRouletteTrack,
+		GetRollAnimationDurationScale = RollScreenOverlay.getRollAnimationDurationScale,
+		GetRollOpeningDurationFromScale = RollScreenOverlay.getRollOpeningDurationFromScale,
+		GetRollPreviewData = RollScreenOverlay.getRollPreviewData,
+		GetRollRouletteTargetOffset = RollScreenOverlay.getRollRouletteTargetOffset,
+		GetSnapshot = ClientStateStore.getSnapshot,
+		RollPet = ClientStateStore.rollPet,
+	})
+	local autoRollEnabled = rollActions.AutoRollEnabled
+	local autoRollIconRotation = rollActions.AutoRollIconRotation
+	local rollAnimation = rollActions.RollAnimation
+	local rollScreenOpen, setRollScreenOpen = React.useState(false)
+	local hideRollAnimation, setHideRollAnimation = React.useState(false)
+	local activeOverlay, setActiveOverlay = React.useState(nil)
+	local tutorialStarted, setTutorialStarted = React.useState(false)
+	local currentTutorialStepId = TutorialOverlay.getCurrentStepId(snapshot)
+	local viewportSize = useViewportSize(HudLayoutConfig.DefaultViewportSize)
+
+	React.useEffect(function()
+		return ClientStateStore.subscribe(function(nextSnapshot)
+			setSnapshot(nextSnapshot)
+		end)
+	end, {})
+
+	React.useEffect(function()
+		local connection = ClientUiSignals.onAscensionRequested(function()
+			setRollScreenOpen(false)
+			setHideRollAnimation(false)
+			setActiveOverlay(ASCENSION_OVERLAY_ID)
+		end)
+
+		return function()
+			connection:Disconnect()
+		end
+	end, {})
+
+	React.useEffect(function()
+		if currentTutorialStepId ~= TutorialConfig.StepIds.Intro or tutorialStarted then
+			return
+		end
+
+		local cancelled = false
+
+		task.spawn(function()
+			local character = player.Character
+			local startedAt = os.clock()
+
+			while character == nil and not cancelled and os.clock() - startedAt < TutorialOverlay.MovementFallbackSeconds do
+				task.wait(0.1)
+				character = player.Character
+			end
+
+			local humanoid = if character ~= nil then character:FindFirstChildOfClass("Humanoid") else nil
+
+			while humanoid == nil and character ~= nil and not cancelled and os.clock() - startedAt < TutorialOverlay.MovementFallbackSeconds do
+				task.wait(0.1)
+				humanoid = character:FindFirstChildOfClass("Humanoid")
+			end
+
+			local movementWaitStartedAt = os.clock()
+
+			while not cancelled and player.Parent ~= nil do
+				if humanoid ~= nil and humanoid.MoveDirection.Magnitude > 0.05 then
+					break
+				end
+
+				if os.clock() - movementWaitStartedAt >= TutorialOverlay.MovementFallbackSeconds then
+					break
+				end
+
+				task.wait(0.1)
+			end
+
+			if not cancelled then
+				setTutorialStarted(true)
+			end
+		end)
+
+		return function()
+			cancelled = true
+		end
+	end, { currentTutorialStepId, tutorialStarted })
+
+	React.useEffect(function()
+		if currentTutorialStepId ~= TutorialConfig.StepIds.Intro or not tutorialStarted then
+			return
+		end
+
+		local cancelled = false
+
+		task.spawn(function()
+			task.wait(TutorialOverlay.IntroSeconds)
+
+			if cancelled then
+				return
+			end
+
+			ClientStateStore.completeTutorialStep(TutorialConfig.StepIds.Intro)
+		end)
+
+		return function()
+			cancelled = true
+		end
+	end, { currentTutorialStepId, tutorialStarted })
+
+	local function rollPet()
+		rollActions.RollPet()
+	end
+
+	local function activateRollScreen()
+		setActiveOverlay(nil)
+		setRollScreenOpen(true)
+		setHideRollAnimation(false)
+
+		rollPet()
+	end
+
+	local function hideRollScreen()
+		setHideRollAnimation(true)
+		setRollScreenOpen(false)
+	end
+
+	local function closeOverlay()
+		setActiveOverlay(nil)
+	end
+
+	local function togglePetInventoryOverlay()
+		setActiveOverlay(function(currentOverlay)
+			return if currentOverlay == PET_INVENTORY_OVERLAY_ID then nil else PET_INVENTORY_OVERLAY_ID
+		end)
+	end
+
+	local function toggleShopOverlay()
+		setActiveOverlay(function(currentOverlay)
+			return if currentOverlay == SHOP_OVERLAY_ID then nil else SHOP_OVERLAY_ID
+		end)
+	end
+
+	local function toggleRitualCoreOverlay()
+		setActiveOverlay(function(currentOverlay)
+			return if currentOverlay == RITUAL_CORE_OVERLAY_ID then nil else RITUAL_CORE_OVERLAY_ID
+		end)
+	end
+
+	local function toggleRitualRushOverlay()
+		setActiveOverlay(function(currentOverlay)
+			return if currentOverlay == RITUAL_RUSH_OVERLAY_ID then nil else RITUAL_RUSH_OVERLAY_ID
+		end)
+	end
+
+	local function toggleRebirthOverlay()
+		setActiveOverlay(function(currentOverlay)
+			return if currentOverlay == REBIRTH_OVERLAY_ID then nil else REBIRTH_OVERLAY_ID
+		end)
+	end
+
+	local function toggleTeleportOverlay()
+		setActiveOverlay(function(currentOverlay)
+			return if currentOverlay == TELEPORT_OVERLAY_ID then nil else TELEPORT_OVERLAY_ID
+		end)
+	end
+
+	local function runServerAction(action)
+		task.spawn(function()
+			local ok, result = pcall(action)
+
+			if not ok then
+				warn(result)
+			end
+		end)
+	end
+
+	local function buyUpgrade(upgradeId)
+		runServerAction(function()
+			return ClientStateStore.buyStoneUpgrade(upgradeId)
+		end)
+	end
+
+	local function rebirth()
+		runServerAction(function()
+			return ClientStateStore.rebirth()
+		end)
+	end
+
+	local function ascend()
+		runServerAction(function()
+			local result = ClientStateStore.ascend()
+
+			if result ~= nil and result.Ok ~= false then
+				setActiveOverlay(nil)
+			end
+
+			return result
+		end)
+	end
+
+	local function selectZone(zoneId)
+		runServerAction(function()
+			return ClientStateStore.selectZone(zoneId)
+		end)
+	end
+
+	local function claimRitualRushReward(milestoneId)
+		runServerAction(function()
+			return ClientStateStore.claimRitualRushReward(milestoneId)
+		end)
+	end
+
+	local function usePotion(potionId)
+		runServerAction(function()
+			return ClientStateStore.usePotion(potionId)
+		end)
+	end
+
+	local function buyPotionWithGems(potionId)
+		runServerAction(function()
+			return ClientStateStore.buyPotionWithGems(potionId)
+		end)
+	end
+
+	local function skipTutorialStep(stepId)
+		runServerAction(function()
+			return ClientStateStore.completeTutorialStep(stepId, TutorialConfig.CompletionModes.Skip)
+		end)
+	end
+
+	if snapshot == nil then
+		return React.createElement("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromScale(1, 1),
+		}, {
+			Loading = HudPrimitives.createLabel("Loading Ritual Core...", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Font = UIThemeConfig.Font,
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromOffset(260, 40),
+				TextSize = 20,
+				TextXAlignment = Enum.TextXAlignment.Center,
+			}),
+		})
+	end
+
+	local zone = ZoneConfig.getZone(snapshot.CurrentZone)
+	local zoneName = if zone ~= nil then zone.DisplayName else "Unknown Zone"
+	local tutorialStep = TutorialOverlay.getStep(snapshot, tutorialStarted)
+	local hudControlScale = HudIconBar.getControlScale(viewportSize, HudLayoutConfig.DefaultViewportSize, 4)
+	local rightHudControlScale = hudControlScale * HudLayoutConfig.RightHudActionScale
+	local rollScreenScale = RollScreenOverlay.getScale(viewportSize)
+	local rollScreenVisible = rollScreenOpen and not hideRollAnimation
+
+	return React.createElement("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+	}, {
+		RollScreenScrim = if rollScreenVisible then React.createElement("Frame", {
+			Active = false,
+			BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+			BackgroundTransparency = RollScreenOverlay.ScrimTransparency,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 5,
+		}) else nil,
+
+		StatsPanel = if not rollScreenVisible then createStatsPanel(snapshot, zoneName) else nil,
+
+		CurrencyDisplay = if not rollScreenVisible then createCurrencyDisplay(snapshot, hudControlScale) else nil,
+
+		ActiveBoostsDisplay = if not rollScreenVisible then ActiveBoostsDisplay.create({
+			ActiveBoosts = snapshot.ActiveBoosts,
+			Scale = hudControlScale,
+		}) else nil,
+
+		ShopOverlay = if activeOverlay == SHOP_OVERLAY_ID and not rollScreenVisible
+			then ShopOverlay.create({
+				Snapshot = snapshot,
+				OnBuyPotion = buyPotionWithGems,
+				OnClose = closeOverlay,
+				OnUsePotion = usePotion,
+				ViewportSize = viewportSize,
+			})
+			else nil,
+
+		PetInventoryOverlay = if activeOverlay == PET_INVENTORY_OVERLAY_ID and not rollScreenVisible
+			then PetInventoryOverlay.create({
+				Snapshot = snapshot,
+				OnClose = closeOverlay,
+				ViewportSize = viewportSize,
+			})
+			else nil,
+
+		RitualCoreOverlay = if activeOverlay == RITUAL_CORE_OVERLAY_ID and not rollScreenVisible
+			then RitualCoreOverlay.create({
+				Snapshot = snapshot,
+				OnClose = closeOverlay,
+				OnBuyUpgrade = buyUpgrade,
+				ViewportSize = viewportSize,
+			})
+			else nil,
+
+		RitualRushOverlay = if activeOverlay == RITUAL_RUSH_OVERLAY_ID and not rollScreenVisible
+			then RitualRushOverlay.create({
+				Snapshot = snapshot,
+				OnClaimReward = claimRitualRushReward,
+				OnClose = closeOverlay,
+				ViewportSize = viewportSize,
+			})
+			else nil,
+
+		RebirthOverlay = if activeOverlay == REBIRTH_OVERLAY_ID and not rollScreenVisible
+			then RebirthOverlay.create({
+				Snapshot = snapshot,
+				OnClose = closeOverlay,
+				OnRebirth = rebirth,
+				ViewportSize = viewportSize,
+			})
+			else nil,
+
+		AscensionOverlay = if activeOverlay == ASCENSION_OVERLAY_ID and not rollScreenVisible
+			then AscensionOverlay.create({
+				Snapshot = snapshot,
+				OnAscend = ascend,
+				OnClose = closeOverlay,
+				ViewportSize = viewportSize,
+			})
+			else nil,
+
+		TeleportOverlay = if activeOverlay == TELEPORT_OVERLAY_ID and not rollScreenVisible
+			then TeleportOverlay.create({
+				Snapshot = snapshot,
+				OnClose = closeOverlay,
+				OnSelectZone = selectZone,
+				ViewportSize = viewportSize,
+			})
+			else nil,
+
+		RollScreenContent = if rollScreenVisible then RollScreenOverlay.create({
+			AutoRollEnabled = autoRollEnabled,
+			AutoRollIconRotation = autoRollIconRotation,
+			OnHide = hideRollScreen,
+			OnToggleAutoRoll = rollActions.ToggleAutoRoll,
+			RollAnimation = rollAnimation,
+			Scale = rollScreenScale,
+		}) else nil,
+
+		BottomHudActions = HudIconBar.create(if rollScreenVisible then {
+			{
+				Name = "Roll",
+				IconId = "RollDice",
+				Activated = activateRollScreen,
+			},
+		} else {
+			{
+				Name = "PetInventory",
+				IconId = "PetInventory",
+				Activated = togglePetInventoryOverlay,
+			},
+			{
+				Name = "Roll",
+				IconId = "RollDice",
+				Activated = activateRollScreen,
+			},
+			{
+				Name = "RitualCore",
+				IconId = "RitualCore",
+				Activated = toggleRitualCoreOverlay,
+			},
+		}, {
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = HudLayoutConfig.RollButtonPosition,
+			ZIndex = 60,
+		}, Enum.FillDirection.Horizontal, hudControlScale),
+
+		RightHudActions = if not rollScreenVisible then HudIconBar.create({
+			{
+				Name = "Shop",
+				IconId = "Shop",
+				Activated = toggleShopOverlay,
+			},
+			{
+				Name = "RitualRush",
+				IconId = "RollDice",
+				Activated = toggleRitualRushOverlay,
+			},
+			{
+				Name = "Rebirth",
+				IconId = "Rebirth",
+				Activated = toggleRebirthOverlay,
+			},
+			{
+				Name = "Teleport",
+				IconId = "Teleporter",
+				Activated = toggleTeleportOverlay,
+			},
+		}, {
+			AnchorPoint = HudLayoutConfig.RightHudActionAnchor,
+			Position = HudLayoutConfig.RightHudActionPosition,
+			ZIndex = 60,
+		}, Enum.FillDirection.Vertical, rightHudControlScale) else nil,
+
+		TutorialOverlay = TutorialOverlay.create({
+			OnSkip = skipTutorialStep,
+			Step = tutorialStep,
+		}),
+	})
+end
+
+return HudApp

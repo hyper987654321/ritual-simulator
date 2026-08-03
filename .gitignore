@@ -1,0 +1,16 @@
+# Local Studio place files
+/*.rbxl
+/*.rbxlx
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+
+# Generated Studio metadata
+sourcemap.json
+
+# Local tooling and transient output
+.rokit/
+*.log
+*.tmp
+*.temp
