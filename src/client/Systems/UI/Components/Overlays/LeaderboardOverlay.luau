@@ -1,23 +1,26 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Packages = ReplicatedStorage:WaitForChild("Packages")
-local React = require(Packages:WaitForChild("React"))
+local React = require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("React"))
+local Kit = require(script.Parent:WaitForChild("OverlayKit"))
+local Config = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config")
+local Theme = require(Config:WaitForChild("UIThemeConfig"))
 
 local LeaderboardOverlay = {}
+local C = Theme.Colors
 
 function LeaderboardOverlay.create(props)
 	local boards = if props.Snapshot and typeof(props.Snapshot.Leaderboards) == "table" then props.Snapshot.Leaderboards.Boards or {} else {}
 	local viewport = props.ViewportSize or Vector2.new(1280, 720)
-	local isMobile = viewport.X < 700
-	local widthScale = if isMobile then 0.94 else 0.76
-	local heightScale = if isMobile then 0.9 else 0.78
-	local children = { Close = React.createElement("TextButton", { BackgroundColor3 = Color3.fromRGB(70, 74, 96), BorderSizePixel = 0, Position = UDim2.new(1, -60, 0, 12), Size = UDim2.fromOffset(44, 44), Font = Enum.Font.GothamBold, Text = "X", TextColor3 = Color3.new(1, 1, 1), TextSize = 16, [React.Event.Activated] = props.OnClose }) }
+	local height = math.min(560, math.max(340, viewport.Y - 32))
+	local list = { Layout = React.createElement("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }) }
 	for index, board in ipairs(boards) do
-		local text = tostring(board.DisplayName or board.BoardId) .. "\n"
-		for _, row in ipairs(board.Rows or {}) do text ..= tostring(row.Rank) .. ". " .. tostring(row.DisplayName or row.Name) .. "  " .. tostring(row.Value) .. "\n" end
-		children["Board" .. index] = React.createElement("TextLabel", { BackgroundColor3 = Color3.fromRGB(39, 43, 62), BorderSizePixel = 0, LayoutOrder = index, Size = UDim2.new(1, -12, 0, 150), Font = Enum.Font.Gotham, Text = text, TextColor3 = Color3.new(1, 1, 1), TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top })
+		local rows = { Layout = React.createElement("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }) }
+		for rowIndex, row in ipairs(board.Rows or {}) do
+			rows["Row" .. rowIndex] = Kit.label(string.format("%d   %s   %s", row.Rank or rowIndex, row.DisplayName or row.Name or "Player", row.Value or "—"), { LayoutOrder = rowIndex, Size = UDim2.new(1, 0, 0, 28), TextSize = 14, TextColor3 = if rowIndex == 1 then C.Accent else C.Ink })
+		end
+		list["Board" .. index] = React.createElement("Frame", { BackgroundColor3 = C.Card, BorderSizePixel = 0, LayoutOrder = index, Size = UDim2.new(1, -8, 0, 174) }, { Corner = React.createElement("UICorner", { CornerRadius = UDim.new(0, 10) }), Name = Kit.label(board.DisplayName or "Leaderboard", { Position = UDim2.fromOffset(14, 10), Size = UDim2.new(1, -28, 0, 28), TextColor3 = C.Accent, TextSize = 17 }), Rows = React.createElement("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 44), Size = UDim2.new(1, -28, 0, 118) }, rows) })
 	end
-	children.Layout = React.createElement("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder })
-	return React.createElement("Frame", { BackgroundColor3 = Color3.fromRGB(20, 22, 34), BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromScale(widthScale, heightScale), ZIndex = 70 }, { Title = React.createElement("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 12), Size = UDim2.new(1, -80, 0, 32), Font = Enum.Font.GothamBold, Text = "Current Server Leaderboards", TextColor3 = Color3.new(1, 1, 1), TextSize = 18, TextXAlignment = Enum.TextXAlignment.Left }), List = React.createElement("ScrollingFrame", { Active = true, AutomaticCanvasSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(), Position = UDim2.fromOffset(10, 60), ScrollBarThickness = 6, Size = UDim2.new(1, -20, 1, -70) }, children) })
+	if #boards == 0 then list.Empty = Kit.label("Leaderboards will appear once a server has scores to share.", { LayoutOrder = 1, Size = UDim2.new(1, -8, 0, 64), TextColor3 = C.Muted, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Center }) end
+	return Kit.modal({ Title = "Server Leaderboards", BackgroundId = "RitualCore", MaximumWidth = 680, MaximumHeight = height, ViewportSize = viewport, ZIndex = 70, OnClose = props.OnClose, Children = { List = React.createElement("ScrollingFrame", { Active = true, AutomaticCanvasSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(), Position = UDim2.fromOffset(22, 84), ScrollBarThickness = 5, Size = UDim2.new(1, -44, 1, -104), ZIndex = 72 }, list) } })
 end
 
 return LeaderboardOverlay
