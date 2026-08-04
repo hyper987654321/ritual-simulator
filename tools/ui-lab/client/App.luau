@@ -5,39 +5,329 @@ local Fixtures = require(ReplicatedStorage:WaitForChild("UILab"):WaitForChild("F
 local Registry = require(ReplicatedStorage:WaitForChild("UILab"):WaitForChild("StoryRegistry"))
 local Diagnostics = require(ReplicatedStorage:WaitForChild("UILab"):WaitForChild("Diagnostics"))
 
-local C = { Canvas = Color3.fromRGB(16, 20, 32), Panel = Color3.fromRGB(25, 31, 47), Card = Color3.fromRGB(32, 40, 59), Stroke = Color3.fromRGB(79, 91, 117), Ink = Color3.fromRGB(244, 246, 250), Muted = Color3.fromRGB(167, 178, 199), Violet = Color3.fromRGB(151, 116, 242), Cyan = Color3.fromRGB(91, 206, 220), Gold = Color3.fromRGB(239, 190, 85), Green = Color3.fromRGB(96, 197, 139), Red = Color3.fromRGB(230, 112, 117) }
-local function corner(radius) return React.createElement("UICorner", { CornerRadius = UDim.new(0, radius) }) end
-local function stroke(color) return React.createElement("UIStroke", { Color = color, Transparency = 0.35, Thickness = 1 }) end
-local function label(text, props)
-	local p = props or {}; p.Text = text; p.Font = p.Font or Enum.Font.Gotham; p.TextColor3 = p.TextColor3 or C.Ink; p.TextSize = p.TextSize or 14; p.TextXAlignment = p.TextXAlignment or Enum.TextXAlignment.Left; p.TextYAlignment = p.TextYAlignment or Enum.TextYAlignment.Center; p.BackgroundTransparency = 1; p.BorderSizePixel = 0
-	return React.createElement("TextLabel", p)
-end
-local function button(text, props)
-	local p = props or {}; p.Text = text; p.Font = p.Font or Enum.Font.GothamMedium; p.TextSize = p.TextSize or 13; p.TextColor3 = p.TextColor3 or C.Ink; p.BackgroundColor3 = p.BackgroundColor3 or C.Card; p.BorderSizePixel = 0; p.AutoButtonColor = true
-	return React.createElement("TextButton", p, { Corner = corner(8), Stroke = stroke(C.Stroke) })
+local storiesFolder = script.Parent:WaitForChild("stories")
+
+local Colors = {
+	Canvas = Color3.fromRGB(16, 20, 32),
+	Panel = Color3.fromRGB(25, 31, 47),
+	Card = Color3.fromRGB(32, 40, 59),
+	Stroke = Color3.fromRGB(79, 91, 117),
+	Ink = Color3.fromRGB(244, 246, 250),
+	Muted = Color3.fromRGB(167, 178, 199),
+	Violet = Color3.fromRGB(151, 116, 242),
+	Cyan = Color3.fromRGB(91, 206, 220),
+}
+
+local function copyProps(props)
+	local copy = {}
+	for key, value in props or {} do
+		copy[key] = value
+	end
+	return copy
 end
 
-local function Gallery(props)
-	local fixture = props.fixture
-	local cards = {}
-	for index, item in { { "Token roles", "Violet / Cyan / Gold", C.Violet }, { "Spacing", "4 · 8 · 12 · 16 · 24 · 32", C.Cyan }, { "Radius", "8 controls · 12 panels", C.Gold } } do
-		cards["Card" .. index] = React.createElement("Frame", { Name = "Card" .. index, LayoutOrder = index, Size = UDim2.new(1, 0, 0, 68), BackgroundColor3 = C.Card, BorderSizePixel = 0 }, { Corner = corner(8), Stroke = stroke(C.Stroke), Accent = React.createElement("Frame", { Size = UDim2.fromOffset(4, 68), BackgroundColor3 = item[3], BorderSizePixel = 0 }), Title = label(item[1], { Position = UDim2.fromOffset(16, 8), Size = UDim2.new(1, -32, 0, 24), Font = Enum.Font.GothamMedium }), Value = label(item[2], { Position = UDim2.fromOffset(16, 34), Size = UDim2.new(1, -32, 0, 20), TextSize = 12, TextColor3 = C.Muted }) })
+local function corner(radius)
+	return React.createElement("UICorner", { CornerRadius = UDim.new(0, radius) })
+end
+
+local function outline()
+	return React.createElement("UIStroke", {
+		Color = Colors.Stroke,
+		Transparency = 0.35,
+		Thickness = 1,
+	})
+end
+
+local function label(text, props)
+	local resolved = copyProps(props)
+	resolved.Text = text
+	resolved.Font = resolved.Font or Enum.Font.Gotham
+	resolved.TextColor3 = resolved.TextColor3 or Colors.Ink
+	resolved.TextSize = resolved.TextSize or 13
+	resolved.TextXAlignment = resolved.TextXAlignment or Enum.TextXAlignment.Left
+	resolved.TextYAlignment = resolved.TextYAlignment or Enum.TextYAlignment.Center
+	resolved.BackgroundTransparency = 1
+	resolved.BorderSizePixel = 0
+	return React.createElement("TextLabel", resolved)
+end
+
+local function button(text, props)
+	local resolved = copyProps(props)
+	resolved.Text = text
+	resolved.Font = resolved.Font or Enum.Font.GothamMedium
+	resolved.TextColor3 = resolved.TextColor3 or Colors.Ink
+	resolved.TextSize = resolved.TextSize or 12
+	resolved.BackgroundColor3 = resolved.BackgroundColor3 or Colors.Card
+	resolved.BorderSizePixel = 0
+	resolved.AutoButtonColor = true
+	return React.createElement("TextButton", resolved, {
+		Corner = corner(8),
+		Outline = outline(),
+	})
+end
+
+local function choiceRow(items, selected, onSelect)
+	local children = {
+		Layout = React.createElement("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+	for index, item in items do
+		children[item.Id] = button(item.Label, {
+			LayoutOrder = index,
+			Size = UDim2.fromOffset(92, 30),
+			BackgroundColor3 = if item.Id == selected then Colors.Violet else Colors.Card,
+			[React.Event.Activated] = function()
+				onSelect(item.Id)
+			end,
+		})
 	end
-	local children = { Layout = React.createElement("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder }), Buttons = React.createElement("Frame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1 }, { Primary = button("Primary action", { Size = UDim2.fromOffset(154, 44), BackgroundColor3 = C.Violet }), Quiet = button("Quiet action", { Position = UDim2.fromOffset(166, 0), Size = UDim2.fromOffset(140, 44) }), Locked = button("Locked", { Position = UDim2.fromOffset(318, 0), Size = UDim2.fromOffset(110, 44), Active = false, BackgroundColor3 = Color3.fromRGB(54, 59, 72), TextColor3 = C.Muted }) }), Cards = React.createElement("Frame", { LayoutOrder = 2, Size = UDim2.new(1, 0, 0, 228), BackgroundTransparency = 1 }, cards), Anatomy = React.createElement("Frame", { Name = "Anatomy", LayoutOrder = 3, Size = UDim2.new(1, 0, 0, 128), BackgroundColor3 = C.Panel, BorderSizePixel = 0 }, { Corner = corner(12), Stroke = stroke(C.Stroke), Header = label("Modal anatomy", { Position = UDim2.fromOffset(16, 12), Size = UDim2.new(1, -32, 0, 24), Font = Enum.Font.GothamBold }), Body = label("One title · bounded content · optional footer", { Position = UDim2.fromOffset(16, 42), Size = UDim2.new(1, -32, 0, 24), TextColor3 = C.Muted }), Footer = button("Close", { Position = UDim2.new(1, -112, 1, -52), Size = UDim2.fromOffset(96, 36) }) }) }
-	if fixture.Id == "empty" then children.Empty = label("No fixture content — empty states should explain what happens next.", { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 44), TextColor3 = C.Muted }) elseif fixture.Id == "loading" then children.Loading = label("Loading fixture…", { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 44), TextColor3 = C.Cyan }) elseif fixture.Id == "error" then children.Error = label("Could not load fixture. Retry remains visible and calm.", { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 44), TextColor3 = C.Red }) elseif fixture.Id == "locked" then children.Locked = label("This fixture is locked. Explain the gate beside the disabled action.", { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 44), TextColor3 = C.Gold }) end
-	return React.createElement("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, 0) }, children)
+	return React.createElement("Frame", {
+		Size = UDim2.new(1, 0, 0, 32),
+		BackgroundTransparency = 1,
+	}, children)
+end
+
+local function findFixture(id)
+	for _, fixture in Fixtures do
+		if fixture.Id == id then
+			return fixture
+		end
+	end
+	return Fixtures[1]
+end
+
+local function findPreset(id)
+	for _, preset in { Presets.Desktop, Presets.Laptop, Presets.Tablet, Presets.Mobile } do
+		if preset.Id == id then
+			return preset
+		end
+	end
+	return Presets.Desktop
 end
 
 local function App()
-	local storyId, setStoryId = React.useState(Registry.all()[1].Id); local fixtureId, setFixtureId = React.useState("populated"); local presetId, setPresetId = React.useState("desktop"); local diagnostics, setDiagnostics = React.useState(nil); local screenGui = React.useRef(nil)
-	local story = Registry.get(storyId); local fixture = Fixtures[3]; for _, item in Fixtures do if item.Id == fixtureId then fixture = item end end; local preset = Presets.Desktop; for _, item in { Presets.Desktop, Presets.Laptop, Presets.Tablet, Presets.Mobile } do if item.Id == presetId then preset = item end end
-	local function chooser(items, selected, callback, position)
-		local children = { Layout = React.createElement("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }) }
-		for index, item in items do children[item.Id] = button(item.Label, { LayoutOrder = index, Size = UDim2.fromOffset(88, 30), TextSize = 11, BackgroundColor3 = if item.Id == selected then C.Violet else C.Card, [React.Event.Activated] = function() callback(item.Id) end }) end
-		return React.createElement("Frame", { BackgroundTransparency = 1, Position = position or UDim2.fromOffset(78, 0), Size = UDim2.new(1, -78, 0, 32) }, children)
+	local storyId, setStoryId = React.useState(Registry.all()[1].Id)
+	local fixtureId, setFixtureId = React.useState("populated")
+	local presetId, setPresetId = React.useState("desktop")
+	local diagnostics, setDiagnostics = React.useState(nil)
+	local previewRef = React.useRef(nil)
+	local storyRootRef = React.useRef(nil)
+	local displayScale, setDisplayScale = React.useState(1)
+
+	local story = Registry.get(storyId)
+	local fixture = findFixture(fixtureId)
+	local preset = findPreset(presetId)
+	local Story = require(storiesFolder:WaitForChild(story.Module))
+
+	React.useEffect(function()
+		local function updateScale()
+			local preview = previewRef.current
+			if not preview then
+				return
+			end
+			local available = preview.AbsoluteSize - Vector2.new(32, 32)
+			local scaleX = available.X / preset.Width
+			local scaleY = available.Y / preset.Height
+			setDisplayScale(math.max(0.05, math.min(scaleX, scaleY, 1)))
+		end
+		updateScale()
+		local preview = previewRef.current
+		if not preview then
+			return
+		end
+		local connection = preview:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateScale)
+		return function()
+			connection:Disconnect()
+		end
+	end, { presetId })
+
+	local reportRows = {
+		Layout = React.createElement("UIListLayout", {
+			Padding = UDim.new(0, 3),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+	if diagnostics then
+		for index, message in diagnostics.Passed do
+			reportRows["Pass" .. index] = label("PASS " .. message, {
+				LayoutOrder = index,
+				Size = UDim2.new(1, 0, 0, 18),
+				TextSize = 11,
+				TextColor3 = Color3.fromRGB(96, 197, 139),
+			})
+		end
+		for index, message in diagnostics.Warnings do
+			reportRows["Warning" .. index] = label("WARN " .. message, {
+				LayoutOrder = 20 + index,
+				Size = UDim2.new(1, 0, 0, 18),
+				TextSize = 11,
+				TextColor3 = Color3.fromRGB(239, 190, 85),
+			})
+		end
+		for index, message in diagnostics.Errors do
+			reportRows["Error" .. index] = label("ERROR " .. message, {
+				LayoutOrder = 40 + index,
+				Size = UDim2.new(1, 0, 0, 18),
+				TextSize = 11,
+				TextColor3 = Color3.fromRGB(230, 112, 117),
+			})
+		end
+	else
+		reportRows.Empty = label("Run a report after the story settles.", {
+			Size = UDim2.new(1, 0, 0, 18),
+			TextSize = 11,
+			TextColor3 = Colors.Muted,
+		})
 	end
-	local reportChildren = { Layout = React.createElement("UIListLayout", { Padding = UDim.new(0, 4) }) }
-	if diagnostics then for index, message in diagnostics.Passed do reportChildren["P" .. index] = label("✓ " .. message, { Size = UDim2.new(1, 0, 0, 18), TextSize = 11, TextColor3 = C.Green }) end; for index, message in diagnostics.Warnings do reportChildren["W" .. index] = label("! " .. message, { Size = UDim2.new(1, 0, 0, 18), TextSize = 11, TextColor3 = C.Gold }) end; for index, message in diagnostics.Errors do reportChildren["E" .. index] = label("× " .. message, { Size = UDim2.new(1, 0, 0, 18), TextSize = 11, TextColor3 = C.Red }) end else reportChildren.Empty = label("Run a report after the story settles.", { Size = UDim2.new(1, 0, 0, 18), TextSize = 11, TextColor3 = C.Muted }) end
-	return React.createElement("ScreenGui", { ref = screenGui, Name = "UILabWorkbench", ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling }, { Background = React.createElement("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.Canvas, BorderSizePixel = 0 }), Top = React.createElement("Frame", { Size = UDim2.new(1, 0, 0, 116), BackgroundColor3 = C.Panel, BorderSizePixel = 0, ZIndex = 20 }, { Title = label("UI LAB / CLEAN-SLATE", { Position = UDim2.fromOffset(20, 12), Size = UDim2.fromOffset(360, 28), Font = Enum.Font.GothamBold, TextSize = 18 }), StoryLabel = label("STORY", { Position = UDim2.fromOffset(20, 46), Size = UDim2.fromOffset(54, 22), TextSize = 10, TextColor3 = C.Muted }), Story = chooser(Registry.all(), storyId, setStoryId, UDim2.fromOffset(78, 42)), FixtureLabel = label("FIXTURE", { Position = UDim2.fromOffset(20, 78), Size = UDim2.fromOffset(54, 22), TextSize = 10, TextColor3 = C.Muted }), Fixture = chooser(Fixtures, fixtureId, setFixtureId, UDim2.fromOffset(78, 74)), PresetLabel = label("DEVICE", { Position = UDim2.fromOffset(500, 46), Size = UDim2.fromOffset(54, 22), TextSize = 10, TextColor3 = C.Muted }), Preset = chooser({ Presets.Desktop, Presets.Laptop, Presets.Tablet, Presets.Mobile }, presetId, setPresetId, UDim2.fromOffset(558, 42)), Run = button("Run diagnostics", { Position = UDim2.new(1, -164, 0, 16), Size = UDim2.fromOffset(140, 34), BackgroundColor3 = C.Cyan, TextColor3 = C.Canvas, [React.Event.Activated] = function() if screenGui.current then setDiagnostics(Diagnostics.inspect(screenGui.current)) end end }) }), SafeArea = React.createElement("Frame", { Name = "SafeArea", Position = UDim2.fromOffset(16, 132 + preset.SafeTop), Size = UDim2.new(1, -32, 1, -232 - preset.SafeTop - preset.SafeBottom), BackgroundColor3 = Color3.fromRGB(20, 25, 39), BorderSizePixel = 0 }, { Corner = corner(12), Stroke = stroke(C.Stroke), Label = label("SAFE AREA / " .. preset.Label .. " " .. preset.Width .. "×" .. preset.Height, { Position = UDim2.fromOffset(16, 12), Size = UDim2.new(1, -32, 0, 24), TextColor3 = C.Muted, TextSize = 11 }), StoryTitle = label(story.Label, { Position = UDim2.fromOffset(16, 48), Size = UDim2.new(1, -32, 0, 28), Font = Enum.Font.GothamBold, TextSize = 20 }), Description = label(story.Description .. "  ·  Fixture: " .. fixture.Tone, { Position = UDim2.fromOffset(16, 78), Size = UDim2.new(1, -32, 0, 24), TextColor3 = C.Muted }), Canvas = React.createElement("Frame", { Position = UDim2.fromOffset(16, 116), Size = UDim2.new(1, -32, 1, -132), BackgroundColor3 = Color3.fromRGB(14, 18, 28), BorderSizePixel = 0, ClipsDescendants = true }, { Corner = corner(8), Gallery = React.createElement(Gallery, { fixture = fixture }) }) }), Diagnostics = React.createElement("Frame", { Name = "Diagnostics", Position = UDim2.new(1, -336, 1, -84), Size = UDim2.fromOffset(320, 68), BackgroundColor3 = C.Panel, BorderSizePixel = 0, ZIndex = 30 }, { Corner = corner(8), Stroke = stroke(C.Stroke), Title = label("DIAGNOSTICS", { Position = UDim2.fromOffset(12, 6), Size = UDim2.new(1, -24, 0, 18), Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = C.Cyan }), Body = React.createElement("Frame", { Position = UDim2.fromOffset(12, 27), Size = UDim2.new(1, -24, 1, -32), BackgroundTransparency = 1 }, reportChildren) }) })
+
+	local toolbarContent = React.createElement("Frame", {
+		Size = UDim2.fromOffset(1240, 108),
+		BackgroundTransparency = 1,
+	}, {
+		Title = label("UI LAB / CLEAN-SLATE", {
+			Position = UDim2.fromOffset(16, 8),
+			Size = UDim2.fromOffset(320, 24),
+			Font = Enum.Font.GothamBold,
+			TextSize = 17,
+		}),
+		StoryLabel = label("STORY", {
+			Position = UDim2.fromOffset(16, 42),
+			Size = UDim2.fromOffset(56, 22),
+			TextSize = 10,
+			TextColor3 = Colors.Muted,
+		}),
+		StoryChoices = React.createElement("Frame", {
+			Position = UDim2.fromOffset(76, 38),
+			Size = UDim2.fromOffset(300, 32),
+			BackgroundTransparency = 1,
+		}, choiceRow(Registry.all(), storyId, setStoryId)),
+		FixtureLabel = label("FIXTURE", {
+			Position = UDim2.fromOffset(16, 76),
+			Size = UDim2.fromOffset(56, 22),
+			TextSize = 10,
+			TextColor3 = Colors.Muted,
+		}),
+		FixtureChoices = React.createElement("Frame", {
+			Position = UDim2.fromOffset(76, 72),
+			Size = UDim2.fromOffset(520, 32),
+			BackgroundTransparency = 1,
+		}, choiceRow(Fixtures, fixtureId, setFixtureId)),
+		DeviceLabel = label("DEVICE", {
+			Position = UDim2.fromOffset(420, 42),
+			Size = UDim2.fromOffset(56, 22),
+			TextSize = 10,
+			TextColor3 = Colors.Muted,
+		}),
+		DeviceChoices = React.createElement("Frame", {
+			Position = UDim2.fromOffset(480, 38),
+			Size = UDim2.fromOffset(400, 32),
+			BackgroundTransparency = 1,
+		}, choiceRow({ Presets.Desktop, Presets.Laptop, Presets.Tablet, Presets.Mobile }, presetId, setPresetId)),
+		SizeInfo = label(string.format("DESIGN %dx%d  DISPLAY SCALE %.2f", preset.Width, preset.Height, displayScale), {
+			Position = UDim2.fromOffset(900, 42),
+			Size = UDim2.fromOffset(320, 22),
+			TextSize = 11,
+			TextColor3 = Colors.Cyan,
+		}),
+		Run = button("Run diagnostics", {
+			Position = UDim2.fromOffset(900, 74),
+			Size = UDim2.fromOffset(150, 30),
+			BackgroundColor3 = Colors.Cyan,
+			TextColor3 = Colors.Canvas,
+			[React.Event.Activated] = function()
+				if storyRootRef.current then
+					setDiagnostics(Diagnostics.inspect(storyRootRef.current))
+				end
+			end,
+		}),
+	})
+
+	return React.createElement("Frame", {
+		Name = "UILabApp",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Colors.Canvas,
+		BorderSizePixel = 0,
+	}, {
+		Toolbar = React.createElement("ScrollingFrame", {
+			Name = "ToolbarScroll",
+			Size = UDim2.new(1, 0, 0, 116),
+			CanvasSize = UDim2.fromOffset(1240, 0),
+			ScrollingDirection = Enum.ScrollingDirection.X,
+			ScrollBarThickness = 5,
+			ScrollBarImageColor3 = Colors.Violet,
+			BackgroundColor3 = Colors.Panel,
+			BorderSizePixel = 0,
+			ClipsDescendants = true,
+			ZIndex = 20,
+		}, {
+			Content = toolbarContent,
+		}),
+		Preview = React.createElement("Frame", {
+			Name = "PreviewViewport",
+			ref = previewRef,
+			Position = UDim2.fromOffset(16, 132),
+			Size = UDim2.new(1, -32, 1, -148),
+			BackgroundColor3 = Color3.fromRGB(20, 25, 39),
+			BorderSizePixel = 0,
+			ClipsDescendants = true,
+			ZIndex = 1,
+		}, {
+			Corner = corner(12),
+			Outline = outline(),
+			CanvasLabel = label("FIXED DESIGN CANVAS", {
+				Position = UDim2.fromOffset(12, 8),
+				Size = UDim2.fromOffset(220, 18),
+				TextSize = 10,
+				TextColor3 = Colors.Muted,
+				ZIndex = 2,
+			}),
+			DesignCanvas = React.createElement("Frame", {
+				Name = "DesignCanvas",
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromOffset(preset.Width, preset.Height),
+				BackgroundTransparency = 1,
+				ZIndex = 1,
+			}, {
+				Scale = React.createElement("UIScale", { Scale = displayScale }),
+				Story = React.createElement(Story, {
+					fixture = fixture,
+					preset = preset,
+					storyRootRef = storyRootRef,
+				}),
+			}),
+		}),
+		Diagnostics = React.createElement("Frame", {
+			Name = "DiagnosticsChrome",
+			Position = UDim2.new(1, -356, 1, -140),
+			Size = UDim2.fromOffset(340, 116),
+			BackgroundColor3 = Colors.Panel,
+			BorderSizePixel = 0,
+			ZIndex = 30,
+		}, {
+			Corner = corner(8),
+			Outline = outline(),
+			Title = label("DIAGNOSTICS / STORYROOT ONLY", {
+				Position = UDim2.fromOffset(12, 6),
+				Size = UDim2.new(1, -24, 0, 18),
+				Font = Enum.Font.GothamBold,
+				TextSize = 10,
+				TextColor3 = Colors.Cyan,
+			}),
+			Body = React.createElement("ScrollingFrame", {
+				Position = UDim2.fromOffset(12, 28),
+				Size = UDim2.new(1, -24, 1, -36),
+				CanvasSize = UDim2.new(),
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
+				ScrollBarThickness = 4,
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+			}, reportRows),
+		}),
+	})
 end
+
 return App
