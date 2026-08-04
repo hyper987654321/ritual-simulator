@@ -31,6 +31,7 @@ function HudController.start()
 		mountTarget.Name = UI_ROOT_NAME
 		mountTarget.ResetOnSpawn = false
 		mountTarget.IgnoreGuiInset = true
+		mountTarget.ScreenInsets = Enum.ScreenInsets.DeviceSafeInsets
 		mountTarget.ZIndexBehavior = Enum.ZIndexBehavior.Global
 		mountTarget.Parent = playerGui
 	end

@@ -28,6 +28,7 @@ local AscensionOverlay = require(OverlayComponents:WaitForChild("AscensionOverla
 local HudIconBar = require(CommonComponents:WaitForChild("HudIconBar"))
 local ActiveBoostsDisplay = require(HudComponents:WaitForChild("ActiveBoostsDisplay"))
 local HudLayoutConfig = require(HudComponents:WaitForChild("HudLayoutConfig"))
+local HudBottomNav = require(HudComponents:WaitForChild("HudBottomNav"))
 local HudPrimitives = require(CommonComponents:WaitForChild("HudPrimitives"))
 local PetInventoryOverlay = require(OverlayComponents:WaitForChild("PetInventoryOverlay"))
 local RebirthOverlay = require(OverlayComponents:WaitForChild("RebirthOverlay"))
@@ -192,6 +193,74 @@ local function createStatsPanel(snapshot, zoneName)
 		),
 		Rolls = HudPrimitives.createStatRow("Rolls", NumberFormatter.compact(snapshot.Rolls), 7),
 	})
+end
+
+local function createCompactStatus(snapshot, zoneName)
+	local stoneStats = if typeof(snapshot.StoneStats) == "table" then snapshot.StoneStats else {}
+	local capacity = stoneStats.Capacity or 0
+	local essenceText = string.format("%s / %s", NumberFormatter.compact(snapshot.Essence or 0), NumberFormatter.compact(capacity))
+
+	return React.createElement("Frame", {
+		BackgroundColor3 = Color3.fromRGB(19, 16, 31),
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(16, 12),
+		Size = UDim2.fromOffset(350, 62),
+		ZIndex = 58,
+	}, {
+		Corner = HudPrimitives.createCorner(14),
+		Stroke = HudPrimitives.createStroke(Color3.fromRGB(111, 86, 176), 0.35),
+		Zone = HudPrimitives.createLabel(zoneName:upper(), {
+			Position = UDim2.fromOffset(14, 7),
+			Size = UDim2.fromOffset(120, 16),
+			TextColor3 = Color3.fromRGB(106, 224, 239),
+			TextSize = 11,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 59,
+		}),
+		Essence = HudPrimitives.createLabel("ESSENCE  " .. essenceText, {
+			Position = UDim2.fromOffset(14, 25),
+			Size = UDim2.fromOffset(205, 27),
+			TextColor3 = Color3.fromRGB(231, 226, 250),
+			TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 59,
+		}),
+		Gems = HudPrimitives.createLabel("✦  " .. NumberFormatter.compact(snapshot.RitualGems or 0), {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -14, 0, 25),
+			Size = UDim2.fromOffset(105, 27),
+			TextColor3 = Color3.fromRGB(255, 207, 104),
+			TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			ZIndex = 59,
+		}),
+	})
+end
+
+local function createRuneHint(snapshot)
+	local runeFocus = snapshot.RuneFocus
+	if typeof(runeFocus) ~= "table" then
+		return nil
+	end
+
+	local text = if runeFocus.IsUnlocked ~= true
+		then string.format("Rune Focus unlocks at Zone %d", runeFocus.RequiredZone or 3)
+		elseif runeFocus.ActiveId == nil then "Rune Focus available — choose a path in Ritual"
+		else "Rune Focus charges from crystal breaks"
+
+	return HudPrimitives.createLabel("ᛉ  " .. text, {
+		AnchorPoint = Vector2.new(0.5, 0),
+		BackgroundColor3 = Color3.fromRGB(27, 23, 47),
+		BackgroundTransparency = 0.12,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0.5, 0, 0, 86),
+		Size = UDim2.fromOffset(330, 28),
+		TextColor3 = Color3.fromRGB(177, 221, 237),
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 57,
+	}, { Corner = HudPrimitives.createCorner(8) })
 end
 
 local function HudApp()
@@ -530,7 +599,6 @@ local function HudApp()
 	local zoneName = if zone ~= nil then zone.DisplayName else "Unknown Zone"
 	local tutorialStep = TutorialOverlay.getStep(snapshot, tutorialStarted)
 	local hudControlScale = HudIconBar.getControlScale(viewportSize, HudLayoutConfig.DefaultViewportSize, 4)
-	local rightHudControlScale = hudControlScale * HudLayoutConfig.RightHudActionScale
 	local rollScreenScale = RollScreenOverlay.getScale(viewportSize)
 	local rollScreenVisible = rollScreenOpen and not hideRollAnimation
 
@@ -563,7 +631,7 @@ local function HudApp()
 			ZIndex = 5,
 		}) else nil,
 
-		StatsPanel = if not rollScreenVisible then createStatsPanel(snapshot, zoneName) else nil,
+		StatusBar = if not rollScreenVisible then createCompactStatus(snapshot, zoneName) else nil,
 
 		GoalChip = if not rollScreenVisible then GoalChip.create({
 			Snapshot = snapshot,
@@ -573,13 +641,7 @@ local function HudApp()
 
 		Notifications = if not rollScreenVisible then NotificationStack.create({ Feedback = feedback }) else nil,
 
-		RunePanel = if not rollScreenVisible then RunePanel.create({
-			Feedback = feedback,
-			OnSelectRuneFocus = selectRuneFocus,
-			Snapshot = snapshot,
-		}) else nil,
-
-		CurrencyDisplay = if not rollScreenVisible then createCurrencyDisplay(snapshot, hudControlScale) else nil,
+		RuneHint = if not rollScreenVisible then createRuneHint(snapshot) else nil,
 
 		ActiveBoostsDisplay = if not rollScreenVisible then ActiveBoostsDisplay.create({
 			ActiveBoosts = snapshot.ActiveBoosts,
@@ -681,76 +743,19 @@ local function HudApp()
 			Scale = rollScreenScale,
 		}) else nil,
 
-		BottomHudActions = HudIconBar.create(if rollScreenVisible then {
-			{
-				Name = "Roll",
-				IconId = "RollDice",
-				Activated = activateRollScreen,
-			},
-		} else {
-			{
-				Name = "PetInventory",
-				IconId = "PetInventory",
-				Activated = togglePetInventoryOverlay,
-			},
-			{
-				Name = "Roll",
-				IconId = "RollDice",
-				Activated = activateRollScreen,
-			},
-			{
-				Name = "RitualCore",
-				IconId = "RitualCore",
-				Activated = toggleRitualCoreOverlay,
-			},
-		}, {
-			AnchorPoint = Vector2.new(0.5, 1),
-			Position = HudLayoutConfig.RollButtonPosition,
-			ZIndex = 60,
-		}, Enum.FillDirection.Horizontal, hudControlScale),
-
-		RightHudActions = if not rollScreenVisible then HudIconBar.create({
-			{
-				Name = "Shop",
-				IconId = "Shop",
-				Activated = toggleShopOverlay,
-			},
-			{
-				Name = "RitualRush",
-				IconId = "RollDice",
-				Activated = toggleRitualRushOverlay,
-			},
-			{
-				Name = "Rebirth",
-				IconId = "Rebirth",
-				Activated = toggleRebirthOverlay,
-			},
-			{
-				Name = "Teleport",
-				IconId = "Teleporter",
-				Activated = toggleTeleportOverlay,
-			},
-			{
-				Name = "Retention",
-				IconId = "RollDice",
-				Activated = toggleRetentionOverlay,
-			},
-			{
-				Name = "Boards",
-				IconId = "RollDice",
-				Activated = toggleLeaderboardOverlay,
-			},
-			{
-				Name = "Social",
-				IconId = "PetInventory",
-				LabelText = "Friends",
-				Activated = toggleSocialOverlay,
-			},
-		}, {
-			AnchorPoint = HudLayoutConfig.RightHudActionAnchor,
-			Position = HudLayoutConfig.RightHudActionPosition,
-			ZIndex = 60,
-		}, Enum.FillDirection.Vertical, rightHudControlScale) else nil,
+		BottomNavigation = if not rollScreenVisible then HudBottomNav.create({
+			ViewportSize = viewportSize,
+			OnPets = togglePetInventoryOverlay,
+			OnRoll = activateRollScreen,
+			OnRitual = toggleRitualCoreOverlay,
+			OnZones = toggleTeleportOverlay,
+			OnShop = toggleShopOverlay,
+			OnRitualRush = toggleRitualRushOverlay,
+			OnRebirth = toggleRebirthOverlay,
+			OnRetention = toggleRetentionOverlay,
+			OnLeaderboard = toggleLeaderboardOverlay,
+			OnSocial = toggleSocialOverlay,
+		}) else HudBottomNav.create({ RollOnly = true, ViewportSize = viewportSize, OnRoll = activateRollScreen }),
 
 		TutorialOverlay = nil,
 	})
