@@ -55,7 +55,11 @@ local function getCapacity(profile, context)
 	if typeof(context) == "table" and typeof(context.getCapacity) == "function" then
 		return integer(context.getCapacity(profile))
 	end
-	return integer(context and context.Capacity) or integer(profile.HighestCapacity)
+	local contextCapacity = if typeof(context) == "table" then context.Capacity else nil
+	if contextCapacity ~= nil then
+		return integer(contextCapacity)
+	end
+	return integer(profile.Capacity or profile.HighestCapacity)
 end
 
 local function getRewardedMilestone(profile, milestoneId, context)

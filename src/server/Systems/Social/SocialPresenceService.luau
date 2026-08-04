@@ -65,25 +65,37 @@ function SocialPresenceService:_cancel(key)
 end
 
 function SocialPresenceService:_award(player, profile)
-	local social = if typeof(profile.Social) == "table" then profile.Social else {}
-	profile.Social = social
-	if social.FirstCoPlayRewarded == true then return false end
+	local withProfileLock = self.Callbacks.withProfileLock
 	local grant = self.Callbacks.grantReward
-	if typeof(grant) == "function" then
-		local ok, granted = pcall(grant, player, profile, REWARD_GEMS)
-		if not ok or granted == false then return false end
-	else
-		profile.RitualGems = finiteInteger(profile.RitualGems) + REWARD_GEMS
+	local saveConfirmed = self.Callbacks.saveConfirmed
+	if typeof(withProfileLock) ~= "function"
+		or typeof(grant) ~= "function"
+		or typeof(saveConfirmed) ~= "function"
+	then
+		return false
 	end
-	social.FirstCoPlayRewarded = true
-	if typeof(self.Callbacks.saveConfirmed) == "function" then
-		local ok, saved = pcall(self.Callbacks.saveConfirmed, player, profile, function(data)
-			return typeof(data) == "table" and typeof(data.Social) == "table" and data.Social.FirstCoPlayRewarded == true
+
+	local awardedProfile = nil
+	local ok, saved = pcall(withProfileLock, player, function(lockedProfile)
+		if typeof(lockedProfile) ~= "table" then return false end
+		local social = if typeof(lockedProfile.Social) == "table" then lockedProfile.Social else {}
+		lockedProfile.Social = social
+		if social.FirstCoPlayRewarded == true then return false end
+		local grantedOk, granted = pcall(grant, player, lockedProfile, REWARD_GEMS)
+		if not grantedOk or granted == false then return false end
+		social.FirstCoPlayRewarded = true
+		local saveOk, confirmed = pcall(saveConfirmed, player, lockedProfile, function(data)
+			return typeof(data) == "table"
+				and typeof(data.Social) == "table"
+				and data.Social.FirstCoPlayRewarded == true
 		end)
-		if not ok or saved ~= true then return false end
-	end
+		if not saveOk or confirmed ~= true then return false end
+		awardedProfile = lockedProfile
+		return true
+	end)
+	if not ok or saved ~= true then return false end
 	if typeof(self.Callbacks.publishReward) == "function" then
-		self.Callbacks.publishReward(player, profile, REWARD_GEMS)
+		self.Callbacks.publishReward(player, awardedProfile or profile, REWARD_GEMS)
 	end
 	return true
 end
@@ -108,17 +120,30 @@ end
 function SocialPresenceService:_consider(left, right)
 	if left == nil or right == nil or left == right then return end
 	local key = pairKey(left, right)
-	if self.Pairs[key] ~= nil then return end
+	local pairState = self.Pairs[key]
+	if pairState ~= nil and pairState.Kind == "timer" then return end
 	local leftProfile, rightProfile = self:_profile(left), self:_profile(right)
 	if not self:_ready(left, leftProfile) or not self:_ready(right, rightProfile)
 		or not self:_hasRoll(left, leftProfile) or not self:_hasRoll(right, rightProfile) then return end
-	local friendship = self.Pairs[key .. ":friend"]
+	local friendship = pairState
 	if friendship == nil then
-		friendship = { Result = self:_verifyFriendship(left, right) }
-		self.Pairs[key .. ":friend"] = friendship
+		friendship = {
+			Kind = "friend",
+			Left = left,
+			Right = right,
+			Result = self:_verifyFriendship(left, right),
+		}
+		self.Pairs[key] = friendship
 	end
 	if friendship.Result ~= true then return end
-	local state = { Key = key, Generation = 1, ExpectedGeneration = 1 }
+	local state = {
+		Kind = "timer",
+		Key = key,
+		Left = left,
+		Right = right,
+		Generation = 1,
+		ExpectedGeneration = 1,
+	}
 	self.Pairs[key] = state
 	self:_schedule(left, right, state)
 end
@@ -136,10 +161,9 @@ SocialPresenceService.onFirstRoll = SocialPresenceService.profileBecameEligible
 
 function SocialPresenceService:playerRemoving(player)
 	self.Players[player] = nil
-	for key in pairs(self.Pairs) do
-		if string.find(key, tostring(player.UserId), 1, true) ~= nil then
+	for key, state in pairs(self.Pairs) do
+		if state.Left == player or state.Right == player then
 			self:_cancel(key)
-			self.Pairs[key .. ":friend"] = nil
 		end
 	end
 end
