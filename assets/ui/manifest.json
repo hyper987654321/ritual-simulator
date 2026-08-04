@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "task_id": "production.image-ui-core-kit",
+  "active_game_id": "ritual-simulator-v1",
+  "generated_with": "built-in imagegen workflow",
+  "human_review_state": "pending",
+  "assets": [
+    {
+      "logical_id": "ui.icon.shop",
+      "path": "assets/ui/icons/shop.png",
+      "sha256": "6b200dc44b16940ff69563345d53bcf5631c53a91f6f16ab36e8f6ce0a74121e",
+      "bytes": 1184267,
+      "width": 1254,
+      "height": 1254,
+      "provenance": "built-in imagegen workflow (gpt-image-2); flat chroma-key source converted with installed remove_chroma_key.py",
+      "validation": "bitmap facts verified; alpha channel and transparent corners verified",
+      "human_review_state": "pending"
+    },
+    {
+      "logical_id": "ui.icon.roll_dice",
+      "path": "assets/ui/icons/roll_dice.png",
+      "sha256": "050d3e084d79740362773dcde1aa5cf310776882a519ba987b2c9968b1ddd7b1",
+      "bytes": 1788756,
+      "width": 1254,
+      "height": 1254,
+      "provenance": "built-in imagegen workflow (gpt-image-2); flat chroma-key source converted with installed remove_chroma_key.py",
+      "validation": "bitmap facts verified; alpha channel and transparent corners verified",
+      "human_review_state": "pending"
+    },
+    {
+      "logical_id": "ui.icon.ritual_core",
+      "path": "assets/ui/icons/ritual_core.png",
+      "sha256": "755f6c187ace0dadaca15b8499de2be4b635edce92695823cf07e7777bff76aa",
+      "bytes": 1532769,
+      "width": 1254,
+      "height": 1254,
+      "provenance": "built-in imagegen workflow (gpt-image-2); flat chroma-key source converted with installed remove_chroma_key.py",
+      "validation": "bitmap facts verified; alpha channel and transparent corners verified",
+      "human_review_state": "pending"
+    },
+    {
+      "logical_id": "ui.icon.pet_inventory",
+      "path": "assets/ui/icons/pet_inventory.png",
+      "sha256": "4a0e5b9ce61ad6002ceab15bb1a3cf3fa15e04f0750155d0a8a8973b287f7dd8",
+      "bytes": 1546584,
+      "width": 1254,
+      "height": 1254,
+      "provenance": "built-in imagegen workflow (gpt-image-2); flat chroma-key source converted with installed remove_chroma_key.py",
+      "validation": "bitmap facts verified; alpha channel and transparent corners verified",
+      "human_review_state": "pending"
+    },
+    {
+      "logical_id": "ui.icon.close",
+      "path": "assets/ui/icons/close.png",
+      "sha256": "12f128c8d6a3678d6b84ca9f8d87fcf18a6f85d21ab0a5d7892467c70fc9e976",
+      "bytes": 1795121,
+      "width": 1254,
+      "height": 1254,
+      "provenance": "built-in imagegen workflow (gpt-image-2); flat chroma-key source converted with installed remove_chroma_key.py",
+      "validation": "bitmap facts verified; alpha channel and transparent corners verified",
+      "human_review_state": "pending"
+    },
+    {
+      "logical_id": "ui.background.pet_inventory",
+      "path": "assets/ui/backgrounds/pet_inventory.png",
+      "sha256": "380d4b05dd4f8a032268e8785013a8af102d63a942ba462816820c0e300cbb83",
+      "bytes": 1854172,
+      "width": 1536,
+      "height": 1024,
+      "provenance": "built-in imagegen workflow (gpt-image-2); opaque atmospheric panel generated for pet inventory",
+      "validation": "bitmap facts verified; PNG decoded; quiet center visually inspected",
+      "human_review_state": "pending"
+    },
+    {
+      "logical_id": "ui.background.ritual_core",
+      "path": "assets/ui/backgrounds/ritual_core.png",
+      "sha256": "26c9416f8fbed319b993617611e5076e809644a77e758971753107313fbafd11",
+      "bytes": 1943554,
+      "width": 1693,
+      "height": 929,
+      "provenance": "built-in imagegen workflow (gpt-image-2); opaque atmospheric panel generated for ritual core",
+      "validation": "bitmap facts verified; PNG decoded; quiet center visually inspected",
+      "human_review_state": "pending"
+    },
+    {
+      "logical_id": "ui.background.rebirth",
+      "path": "assets/ui/backgrounds/rebirth.png",
+      "sha256": "f30d2b4c5133dc6fdf1d191812199b8bc00fa54bd8719fc9f75c77bf9c3eb93b",
+      "bytes": 2061164,
+      "width": 1672,
+      "height": 941,
+      "provenance": "built-in imagegen workflow (gpt-image-2); opaque atmospheric panel generated for rebirth",
+      "validation": "bitmap facts verified; PNG decoded; quiet center visually inspected",
+      "human_review_state": "pending"
+    }
+  ]
+}
