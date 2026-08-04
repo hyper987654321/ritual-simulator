@@ -47,6 +47,20 @@ local function getVolumeCFrame(center, height)
 	return CFrame.new(center.X, center.Y + height / 2, center.Z)
 end
 
+local function makeHorizontalPerimeter(collision, name, center, width, isOpen)
+	if not isOpen then
+		makePart(collision, name, CFrame.new(center), Vector3.new(width, WALL_HEIGHT, WALL_THICKNESS), { CanTouch = false })
+		return
+	end
+
+	local openingWidth = 20
+	local segmentWidth = (width - openingWidth) / 2
+	assert(segmentWidth > 0, "zone perimeter is too narrow for connector opening")
+	local segmentOffset = openingWidth / 2 + segmentWidth / 2
+	makePart(collision, name .. "West", CFrame.new(center + Vector3.new(-segmentOffset, 0, 0)), Vector3.new(segmentWidth, WALL_HEIGHT, WALL_THICKNESS), { CanTouch = false })
+	makePart(collision, name .. "East", CFrame.new(center + Vector3.new(segmentOffset, 0, 0)), Vector3.new(segmentWidth, WALL_HEIGHT, WALL_THICKNESS), { CanTouch = false })
+end
+
 local function buildZone(root, zoneId, zonesRoot, anchorsRoot)
 	local definition = ZoneConfig.getZone(zoneId)
 	local bounds = ZoneConfig.getZoneBounds(zoneId)
@@ -68,8 +82,8 @@ local function buildZone(root, zoneId, zonesRoot, anchorsRoot)
 	local wallY = originY + WALL_HEIGHT / 2
 	local halfX = bounds.Size.X / 2
 	local halfZ = bounds.Size.Z / 2
-	makePart(collision, "PerimeterNorth", CFrame.new(bounds.Center.X, wallY, bounds.Center.Z - halfZ), Vector3.new(bounds.Size.X, WALL_HEIGHT, WALL_THICKNESS), { CanTouch = false })
-	makePart(collision, "PerimeterSouth", CFrame.new(bounds.Center.X, wallY, bounds.Center.Z + halfZ), Vector3.new(bounds.Size.X, WALL_HEIGHT, WALL_THICKNESS), { CanTouch = false })
+	makeHorizontalPerimeter(collision, "PerimeterNorth", Vector3.new(bounds.Center.X, wallY, bounds.Center.Z - halfZ), bounds.Size.X, zoneId > 1)
+	makeHorizontalPerimeter(collision, "PerimeterSouth", Vector3.new(bounds.Center.X, wallY, bounds.Center.Z + halfZ), bounds.Size.X, zoneId < RitualWorldContract.ZoneCount)
 	makePart(collision, "PerimeterEast", CFrame.new(bounds.Center.X + halfX, wallY, bounds.Center.Z), Vector3.new(WALL_THICKNESS, WALL_HEIGHT, bounds.Size.Z), { CanTouch = false })
 	makePart(collision, "PerimeterWest", CFrame.new(bounds.Center.X - halfX, wallY, bounds.Center.Z), Vector3.new(WALL_THICKNESS, WALL_HEIGHT, bounds.Size.Z), { CanTouch = false })
 

@@ -147,9 +147,19 @@ local function validateAnchors(zoneId, folder, errors)
 		table.insert(required, "AscensionStatue")
 	end
 
+	local function getNamedChildren(name)
+		local matches = {}
+		for _, child in ipairs(folder:GetChildren()) do
+			if child.Name == name then
+				table.insert(matches, child)
+			end
+		end
+		return matches
+	end
+
 	for _, name in ipairs(required) do
-		local anchor = folder:FindFirstChild(name)
-		if anchor == nil or not isSafeMarker(anchor) then
+		local matches = getNamedChildren(name)
+		if #matches ~= 1 or not isSafeMarker(matches[1]) then
 			table.insert(errors, prefix .. " missing or unsafe " .. name)
 		end
 	end
@@ -160,24 +170,29 @@ local function validateAnchors(zoneId, folder, errors)
 		end
 	end
 
+	local crystalInstances = 0
+	for _, child in ipairs(folder:GetChildren()) do
+		if string.match(child.Name, "^Crystal_%d+$") then
+			crystalInstances += 1
+		end
+	end
+	if crystalInstances ~= 5 then
+		table.insert(errors, prefix .. " must have exactly five crystal anchor instances")
+	end
+
 	local seen = {}
 	for crystalId = 1, 5 do
 		local name = "Crystal_" .. tostring(crystalId)
-		local anchor = folder:FindFirstChild(name)
-		if anchor == nil or not isSafeMarker(anchor) then
+		local matches = getNamedChildren(name)
+		if #matches ~= 1 or not isSafeMarker(matches[1]) then
 			table.insert(errors, prefix .. " missing or unsafe " .. name)
 		else
 			for _, previous in ipairs(seen) do
-				if anchor.CFrame == previous then
+				if matches[1].CFrame == previous then
 					table.insert(errors, prefix .. " duplicate crystal CFrame")
 				end
 			end
-			table.insert(seen, anchor.CFrame)
-		end
-	end
-	for _, child in ipairs(folder:GetChildren()) do
-		if string.match(child.Name, "^Crystal_%d+$") and not string.match(child.Name, "^Crystal_[1-5]$") then
-			table.insert(errors, prefix .. " has extra crystal anchor")
+			table.insert(seen, matches[1].CFrame)
 		end
 	end
 end
