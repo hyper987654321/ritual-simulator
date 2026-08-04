@@ -342,15 +342,17 @@ function RuneFocusProgress.grantOfflineCharge(profile, focusId, requestedCharge)
 	local acceptedCharge = math.min(amount, ProfileContract.MaximumExactInteger - currentCharge)
 	local carriedCharge = currentCharge + acceptedCharge
 	local levelsGained = 0
+	local consumedCharge = 0
 	while level < focus.MaxLevel do
 		local requirement = RuneFocusConfig.getRequiredCharge(focusId, level)
 		if requirement == nil or requirement <= 0 or carriedCharge < requirement then break end
 		carriedCharge -= requirement
+		consumedCharge += requirement
 		level += 1
 		levelsGained += 1
 	end
 	if level >= focus.MaxLevel then carriedCharge = 0 end
-	local chargeApplied = acceptedCharge
+	local chargeApplied = math.clamp(consumedCharge + carriedCharge - currentCharge, 0, acceptedCharge)
 	runeFocus.Levels[focusId] = level
 	runeFocus.Charge[focusId] = carriedCharge
 	local pending = getFeedbackState(profile).PendingChargeByFocus[focusId]

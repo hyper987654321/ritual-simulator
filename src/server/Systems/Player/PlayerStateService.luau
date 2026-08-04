@@ -2762,6 +2762,10 @@ local function loadProfileForPlayer(player, loadToken, loadContext)
 			player:Kick("Could not initialize your player data. Please rejoin.")
 		end
 	end
+
+	if published and socialPresenceService ~= nil and typeof(socialPresenceService.profileBecameEligible) == "function" then
+		socialPresenceService:profileBecameEligible(player)
+	end
 end
 
 local function queueProfileLoad(player)

@@ -10,7 +10,7 @@ function AwayRewardOverlay.create(props)
 	local mobile = viewport.X < 600
 	local charges = away.RuneChargeByFocus or {}
 	local chargeText = string.format("Capacity: %s  •  Pet Power: %s\nRitual Speed: %s  •  Luck: %s", charges.capacity or 0, charges.pet_power or 0, charges.ritual_speed or 0, charges.luck or 0)
-	local capText = if away.WasTimeCapped then "Eight-hour cap applied" else "No time cap applied"
+	local capText = if away.WasTimeCapped then "Away time cap applied" else "No away time cap applied"
 	local loss = math.max(0, (away.EssenceOffered or 0) - (away.EssenceClaimableNow or 0))
 	local width = math.min(560, math.max(260, viewport.X - 24))
 	return HudPrimitives.createPanel({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(width, if mobile then 300 else 250), ZIndex = 80 }, {

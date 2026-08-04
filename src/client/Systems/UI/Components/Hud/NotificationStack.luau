@@ -17,12 +17,19 @@ local labels = {
 	rune_focus_selected = "Rune Focus selected",
 }
 
+local function appendReward(text, reward)
+	if typeof(reward) ~= "table" then return text end
+	if typeof(reward.RitualGems) == "number" and reward.RitualGems > 0 then text ..= string.format(" (+%d Gems)", reward.RitualGems) end
+	if typeof(reward.Essence) == "number" and reward.Essence > 0 then text ..= string.format(" (+%d Essence)", reward.Essence) end
+	return text
+end
+
 local function readable(record)
 	local text = labels[record.EventId] or "Ritual update"
-	local reward = record.Reward or {}
-	local args = record.Args or {}
-	if reward.RitualGems then text ..= string.format(" (+%d Gems)", reward.RitualGems) end
-	if reward.Essence then text ..= string.format(" (+%d Essence)", reward.Essence) end
+	local reward = record.Reward
+	local args = if typeof(record.Args) == "table" then record.Args else {}
+	text = appendReward(text, reward)
+	if args.Reward ~= reward then text = appendReward(text, args.Reward) end
 	if args.MilestoneId then text ..= " — milestone complete" end
 	return string.sub(text, 1, 120)
 end
