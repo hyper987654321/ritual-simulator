@@ -177,12 +177,12 @@ function PlayerDerivedState.calculateRitualPower(stats, equippedPetPower, rebirt
 	return math.clamp(math.floor(rawPower), 0, ProfileContract.MaximumExactInteger)
 end
 
-function PlayerDerivedState.getCurrentRitualRuntime(profile)
+function PlayerDerivedState.getCurrentRitualRuntime(profile, includeActiveBoosts)
 	local runeFocus = if typeof(profile.RuneFocus) == "table" then profile.RuneFocus else {}
 	local runeBonuses = RuneFocusConfig.getBonuses(runeFocus.Levels)
 	local ascensionBonuses = AscensionConfig.getStatBonuses(profile)
 	local stats = RitualStoneConfig.getStats(profile.StoneLevels, profile.Rebirths, runeBonuses, ascensionBonuses)
-	local activeBoosts = BoostConfig.normalizeActiveBoosts(profile.ActiveBoosts)
+	local activeBoosts = if includeActiveBoosts == false then {} else BoostConfig.normalizeActiveBoosts(profile.ActiveBoosts)
 
 	stats.RollSpeedPercent = math.clamp(
 		boundedMultiply(

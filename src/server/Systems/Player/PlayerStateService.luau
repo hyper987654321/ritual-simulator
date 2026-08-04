@@ -41,6 +41,7 @@ local profileOperationQueuesByPlayer = {}
 local random = Random.new()
 local hasStarted = false
 local nextProfileLoadToken = 0
+local socialPresenceService = nil
 
 local function cloneArray(array)
 	local clone = {}
@@ -339,12 +340,10 @@ local function hasPendingAwayClaim(profile)
 end
 
 local function getAwayContext(profile)
-	local runeBonuses, stats, equippedPetPower = PlayerDerivedState.getCurrentRitualRuntime(profile)
+	local runeBonuses, stats, equippedPetPower = PlayerDerivedState.getCurrentRitualRuntime(profile, false)
 	local ascensionBonuses = AscensionConfig.getStatBonuses(profile)
 	local awayCapMinutes = 30
 		+ 15 * getNonNegativeInteger(profile.Rebirths)
-		+ 120 * getNonNegativeInteger(profile.Ascensions)
-		+ 30 * getNonNegativeInteger(profile.AscensionStars)
 		+ getNonNegativeInteger(ascensionBonuses.OfflineCapBonusMinutes)
 
 	return {
@@ -359,7 +358,6 @@ local function getAwayContext(profile)
 		CapacityStateMultiplier = 1,
 		ActiveRuneFocusId = if typeof(profile.RuneFocus) == "table" then profile.RuneFocus.ActiveId else nil,
 		AwayCapMinutes = awayCapMinutes,
-		RuneChargeMultiplier = runeBonuses.PetPowerMultiplier,
 	}
 end
 
@@ -373,6 +371,15 @@ local function refreshAwayCheckpoint(profile, nowUnix)
 		})
 	end
 
+	return result
+end
+
+local function replaceAwayCheckpoint(profile, nowUnix)
+	local result = AwayRewardProgress.createCheckpoint(getAwayContext(profile), nowUnix)
+	if result.Ok == true then
+		profile.AwayRewards = if typeof(profile.AwayRewards) == "table" then profile.AwayRewards else { Version = 1, NextSequence = 1 }
+		profile.AwayRewards.Checkpoint = result.Checkpoint
+	end
 	return result
 end
 
@@ -1128,8 +1135,11 @@ end
 
 function PlayerStateService.getSnapshot(player, expectedProfile)
 	local profile = resolveCurrentProfile(player, expectedProfile)
-
-	return PlayerDerivedState.getSnapshot(profile)
+	local snapshot = PlayerDerivedState.getSnapshot(profile)
+	if snapshot ~= nil and socialPresenceService ~= nil then
+		snapshot.Social = socialPresenceService:getSnapshot(player, profile)
+	end
+	return snapshot
 end
 
 function PlayerStateService.getPublicVisual(player, expectedProfile)
@@ -1158,8 +1168,15 @@ end
 
 function PlayerStateService.getPlayerStateSections(player, expectedProfile, requestedSections)
 	local profile = resolveCurrentProfile(player, expectedProfile)
+	local sections = PlayerDerivedState.getPlayerStateSections(profile, requestedSections)
+	if sections ~= nil and sections.Social ~= nil and socialPresenceService ~= nil then
+		sections.Social = socialPresenceService:getSnapshot(player, profile)
+	end
+	return sections
+end
 
-	return PlayerDerivedState.getPlayerStateSections(profile, requestedSections)
+function PlayerStateService.setSocialPresenceService(service)
+	socialPresenceService = service
 end
 
 function PlayerStateService.takeFeedback(player, expectedProfile, maximumRecords)
@@ -1555,6 +1572,16 @@ function PlayerStateService.claimDailyReward(player, requestedDayIndex)
 	local nowUnix = DateTime.now().UnixTimestamp
 	local result = DailyRewardProgress.claim(profile, requestedDayIndex, nowUnix)
 	if result.Changed ~= true then
+		if result.Code == "already_claimed" then
+			local confirmed = ProfilePersistence.saveConfirmed(player, profile, function(data)
+				return typeof(data) == "table"
+					and typeof(data.DailyRewards) == "table"
+					and data.DailyRewards.LastClaimedDay == result.Snapshot.DayIndex
+			end)
+			if confirmed ~= true then
+				return { Ok = false, Changed = false, Code = "save_confirmation_failed", RetryAfter = 1 }
+			end
+		end
 		return result
 	end
 
@@ -1580,26 +1607,26 @@ function PlayerStateService.resolveAwayRewards(player, kind, sequence)
 	end
 
 	local result = AwayRewardProgress.resolve(profile, kind, sequence, getAwayContext(profile), function(focusId, requestedCharge)
-		local runeFocus = profile.RuneFocus
-		local previousFocusId = runeFocus.ActiveId
-		runeFocus.ActiveId = focusId
-		local granted = RuneFocusProgress.grantOnlineCrystalBreak(profile, {
-			ZoneId = profile.CurrentZone,
-			BaseCrystalReward = requestedCharge,
-			ActualCrystalReward = requestedCharge,
-			EssenceAwarded = requestedCharge,
-			RebirthChargeMultiplier = 1,
-			AscensionChargeMultiplier = 1,
-			ActiveRunePotionMultiplier = 1,
-		})
-		runeFocus.ActiveId = previousFocusId
-		return granted
+		return RuneFocusProgress.grantOfflineCharge(profile, focusId, requestedCharge)
 	end, DateTime.now().UnixTimestamp)
 
 	if result.Changed ~= true then
+		if result.Code == "away_already_resolved" then
+			replaceAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
+			local confirmed = ProfilePersistence.saveConfirmed(player, profile, function(data)
+				return typeof(data) == "table"
+					and typeof(data.AwayRewards) == "table"
+					and typeof(data.AwayRewards.LastResolution) == "table"
+					and data.AwayRewards.LastResolution.Sequence == sequence
+			end)
+			if confirmed ~= true then
+				return { Ok = false, Changed = false, Code = "save_confirmation_failed", RetryAfter = 1 }
+			end
+		end
 		return result
 	end
 
+	replaceAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
 	profile.SnapshotRevision = addExactIntegers(profile.SnapshotRevision, 1)
 	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.AwayRewardClaimed, result.Resolution)
 	commitProfileForPersistence(profile)
@@ -1983,12 +2010,13 @@ function PlayerStateService.rebirth(player)
 		}
 	end
 
+	local rebirthNowUnix = DateTime.now().UnixTimestamp
 	profile.Rebirths = addExactIntegers(profile.Rebirths, 1)
 	completeOnboardingMilestone(profile, "first_rebirth")
-	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.Rebirth)
-	local dailyBonus = DailyRewardProgress.grantFirstRebirthOfDay(profile, function(dailyProfile, source, count)
-		return RitualRushProgress.awardPoints(dailyProfile, source, count)
-	end, DateTime.now().UnixTimestamp)
+	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.Rebirth, 1, rebirthNowUnix)
+	local dailyBonus = DailyRewardProgress.grantFirstRebirthOfDay(profile, function(dailyProfile, source, count, capturedNow)
+		return RitualRushProgress.awardPoints(dailyProfile, source, count, capturedNow)
+	end, rebirthNowUnix)
 	if dailyBonus.Changed == true then
 		PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.FirstRebirthDailyBonus, dailyBonus.Reward)
 	end
@@ -2003,7 +2031,7 @@ function PlayerStateService.rebirth(player)
 	profile.RuneFocusSelectionReadyAt = 0
 	CrystalCombat.resetState(profile, 1)
 	CrystalCombat.setFarmingActive(profile, false)
-	refreshAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
+	replaceAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
 	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.RebirthComplete, {
 		Rebirths = profile.Rebirths,
 	})
@@ -2121,7 +2149,7 @@ function PlayerStateService.ascend(player)
 
 	CrystalCombat.resetState(profile, 1)
 	CrystalCombat.setFarmingActive(profile, false)
-	refreshAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
+	replaceAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
 	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.Ascension)
 	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.AscensionComplete, {
 		Ascensions = nextAscensions,
@@ -2535,6 +2563,9 @@ function PlayerStateService.rollPet(player)
 	profile.RollReadyAt = now + RitualStoneConfig.getRollOpeningCadence(stats.RollSpeedPercent)
 	profile.Rolls = addExactIntegers(profile.Rolls, 1)
 	completeOnboardingMilestone(profile, "first_roll")
+	if socialPresenceService ~= nil and typeof(socialPresenceService.onFirstRoll) == "function" then
+		socialPresenceService:onFirstRoll(player)
+	end
 
 	local petInstance = addPet(profile, petId)
 	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.RollPet)
@@ -2804,7 +2835,7 @@ local function releaseProfileForPlayer(player)
 
 	local profile = record.Profile
 	local committed, commitError = pcall(function()
-		refreshAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
+		replaceAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
 		commitProfileForPersistence(profile)
 	end)
 
@@ -2860,7 +2891,7 @@ function PlayerStateService.start()
 
 				task.spawn(function()
 					local ok, synchronized = pcall(function()
-						refreshAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
+						replaceAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
 						return PlayerStateService.syncProfile(player, profile)
 					end)
 

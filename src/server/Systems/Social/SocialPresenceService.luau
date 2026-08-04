@@ -34,6 +34,12 @@ function SocialPresenceService.new(callbacks)
 	return self
 end
 
+function SocialPresenceService:_notify(player)
+	if typeof(self.Callbacks.publishSocial) == "function" then
+		self.Callbacks.publishSocial(player)
+	end
+end
+
 function SocialPresenceService:_profile(player)
 	local getProfile = self.Callbacks.getProfile
 	return if typeof(getProfile) == "function" then getProfile(player) else nil
@@ -109,11 +115,15 @@ function SocialPresenceService:_schedule(left, right, state)
 			or not self:_verifyFriendship(left, right)
 		then
 			self:_cancel(state.Key)
+			self:_notify(left)
+			self:_notify(right)
 			return
 		end
 		self:_award(left, leftProfile)
 		self:_award(right, rightProfile)
 		self:_cancel(state.Key)
+		self:_notify(left)
+		self:_notify(right)
 	end)
 end
 
@@ -143,9 +153,12 @@ function SocialPresenceService:_consider(left, right)
 		Right = right,
 		Generation = 1,
 		ExpectedGeneration = 1,
+		StartedAt = os.clock(),
 	}
 	self.Pairs[key] = state
 	self:_schedule(left, right, state)
+	self:_notify(left)
+	self:_notify(right)
 end
 
 function SocialPresenceService:playerAdded(player)
@@ -154,10 +167,33 @@ function SocialPresenceService:playerAdded(player)
 end
 
 function SocialPresenceService:profileBecameEligible(player)
-	for other in pairs(self.Players) do self:_consider(player, other) end
+	task.defer(function()
+		if self.Players[player] ~= true or player.Parent ~= Players then return end
+		for other in pairs(self.Players) do self:_consider(player, other) end
+	end)
 end
 
 SocialPresenceService.onFirstRoll = SocialPresenceService.profileBecameEligible
+
+function SocialPresenceService:getSnapshot(player, profile)
+	local social = if typeof(profile.Social) == "table" then profile.Social else {}
+	local verifiedFriendCount = 0
+	local remainingSeconds = if social.FirstCoPlayRewarded == true then 0 else REQUIRED_SECONDS
+	for _, state in pairs(self.Pairs) do
+		if state.Left == player or state.Right == player then
+			if state.Kind == "friend" and state.Result == true or state.Kind == "timer" then verifiedFriendCount += 1 end
+			if state.Kind == "timer" then
+				remainingSeconds = math.min(remainingSeconds, math.max(0, REQUIRED_SECONDS - (os.clock() - state.StartedAt)))
+			end
+		end
+	end
+	return {
+		VerifiedFriendCount = verifiedFriendCount,
+		FirstCoPlayRewarded = social.FirstCoPlayRewarded == true,
+		RequiredSeconds = REQUIRED_SECONDS,
+		RemainingSeconds = remainingSeconds,
+	}
+end
 
 function SocialPresenceService:playerRemoving(player)
 	self.Players[player] = nil

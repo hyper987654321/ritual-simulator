@@ -9,18 +9,18 @@ local RitualRushConfig = require(Config:WaitForChild("RitualRushConfig"))
 
 local RitualRushProgress = {}
 
-function RitualRushProgress.ensureProgress(profile)
+function RitualRushProgress.ensureProgress(profile, _nowUnix)
 	if profile == nil then
 		return nil
 	end
 
-	profile.RitualRush = RitualRushConfig.reconcileProgress(profile.RitualRush)
+	profile.RitualRush = RitualRushConfig.reconcileProgress(profile.RitualRush, _nowUnix)
 
 	return profile.RitualRush
 end
 
-function RitualRushProgress.awardPoints(profile, source, sourceCount)
-	local progress = RitualRushProgress.ensureProgress(profile)
+function RitualRushProgress.awardPoints(profile, source, sourceCount, nowUnix)
+	local progress = RitualRushProgress.ensureProgress(profile, nowUnix)
 
 	if progress == nil then
 		return 0

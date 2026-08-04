@@ -509,6 +509,10 @@ local function HudApp()
 		runServerAction(function() return ClientStateStore.dismissAwayRewards(sequence) end)
 	end
 
+	local function updateGuidance(values)
+		runServerAction(function() return ClientStateStore.updateGuidance(values) end)
+	end
+
 	return React.createElement("Frame", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1),
@@ -526,7 +530,8 @@ local function HudApp()
 
 		GoalChip = if not rollScreenVisible then GoalChip.create({
 			Snapshot = snapshot,
-			OnOpen = function() setActiveOverlay(AWAY_OVERLAY_ID) end,
+			ViewportSize = viewportSize,
+			OnUpdateGuidance = updateGuidance,
 		}) else nil,
 
 		Notifications = if not rollScreenVisible then NotificationStack.create({ Feedback = feedback }) else nil,
@@ -610,11 +615,11 @@ local function HudApp()
 			else nil,
 
 		AwayRewardOverlay = if activeOverlay == AWAY_OVERLAY_ID and not rollScreenVisible
-			then AwayRewardOverlay.create({ Snapshot = snapshot, OnClaim = claimAway, OnDismiss = dismissAway, OnClose = closeOverlay })
+			then AwayRewardOverlay.create({ Snapshot = snapshot, OnClaim = claimAway, OnDismiss = dismissAway, OnClose = closeOverlay, ViewportSize = viewportSize })
 			else nil,
 
 		DailyRewardOverlay = if activeOverlay == DAILY_OVERLAY_ID and not rollScreenVisible
-			then DailyRewardOverlay.create({ Snapshot = snapshot, OnClaim = claimDaily, OnClose = closeOverlay })
+			then DailyRewardOverlay.create({ Snapshot = snapshot, OnClaim = claimDaily, OnClose = closeOverlay, ViewportSize = viewportSize })
 			else nil,
 
 		RollScreenContent = if rollScreenVisible then RollScreenOverlay.create({

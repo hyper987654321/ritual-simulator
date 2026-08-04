@@ -326,6 +326,45 @@ function RuneFocusProgress.grantOnlineCrystalBreak(profile, context)
 	}
 end
 
+function RuneFocusProgress.grantOfflineCharge(profile, focusId, requestedCharge)
+	local focus = RuneFocusConfig.getFocus(focusId)
+	local amount = getSafeInteger(requestedCharge, ProfileContract.MaximumExactInteger)
+	if focus == nil or amount <= 0 or not RuneFocusConfig.canUseFocus(profile.UnlockedZones, profile.Rebirths) then
+		return { Changed = false, ChargeApplied = 0, LevelsGained = 0, Source = "offline" }
+	end
+
+	local runeFocus = ensureRuneFocus(profile)
+	local level = runeFocus.Levels[focusId]
+	local currentCharge = runeFocus.Charge[focusId]
+	if level >= focus.MaxLevel then
+		return { Changed = false, FocusId = focusId, ChargeApplied = 0, LevelsGained = 0, Level = level, Charge = 0, Source = "offline" }
+	end
+	local acceptedCharge = math.min(amount, ProfileContract.MaximumExactInteger - currentCharge)
+	local carriedCharge = currentCharge + acceptedCharge
+	local levelsGained = 0
+	while level < focus.MaxLevel do
+		local requirement = RuneFocusConfig.getRequiredCharge(focusId, level)
+		if requirement == nil or requirement <= 0 or carriedCharge < requirement then break end
+		carriedCharge -= requirement
+		level += 1
+		levelsGained += 1
+	end
+	if level >= focus.MaxLevel then carriedCharge = 0 end
+	local chargeApplied = acceptedCharge
+	runeFocus.Levels[focusId] = level
+	runeFocus.Charge[focusId] = carriedCharge
+	local pending = getFeedbackState(profile).PendingChargeByFocus[focusId]
+	if pending == nil then pending = { ChargeApplied = 0 }; getFeedbackState(profile).PendingChargeByFocus[focusId] = pending end
+	pending.ChargeApplied = math.min(ProfileContract.MaximumExactInteger, pending.ChargeApplied + chargeApplied)
+	pending.Level = level
+	pending.Charge = carriedCharge
+	pending.RequiredCharge = RuneFocusConfig.getRequiredCharge(focusId, level) or 0
+	if levelsGained > 0 then
+		PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.RuneLevelUp, { FocusId = focusId, LevelsGained = levelsGained, Level = level })
+	end
+	return { Changed = chargeApplied > 0 or levelsGained > 0, FocusId = focusId, ChargeApplied = chargeApplied, LevelsGained = levelsGained, Level = level, Charge = carriedCharge, Source = "offline" }
+end
+
 function RuneFocusProgress.queueCapacityFull(profile, canContinueForRune, pauseReason)
 	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.CapacityFull, {
 		CanContinueForRune = canContinueForRune == true,

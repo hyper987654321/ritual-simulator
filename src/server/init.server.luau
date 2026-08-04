@@ -16,7 +16,7 @@ local Network = require(game:GetService("ReplicatedStorage"):WaitForChild("Share
 PetModelReplicationService.start()
 PlayerStateService.start()
 local playerStateUpdated = Network.getRemoteEvent(Network.RemoteEvents.PlayerStateUpdated)
-SocialPresenceService.new({
+local socialPresenceService = SocialPresenceService.new({
 	getProfile = PlayerStateService.getProfile,
 	isProfileReady = PlayerStateService.isCurrentProfile,
 	hasLifetimeRoll = function(_player, profile) return (profile.Rolls or 0) > 0 end,
@@ -26,7 +26,12 @@ SocialPresenceService.new({
 	publishReward = function(player)
 		SnapshotPublisher.publishPlayerStateUpdate(player, playerStateUpdated, { Social = true, RitualGems = true })
 	end,
-}):start()
+	publishSocial = function(player)
+		SnapshotPublisher.publishPlayerStateUpdate(player, playerStateUpdated, { Social = true })
+	end,
+})
+PlayerStateService.setSocialPresenceService(socialPresenceService)
+socialPresenceService:start()
 ShopPurchaseService.start()
 WorldService.start()
 ZoneTravelService.start()
