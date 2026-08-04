@@ -27,7 +27,7 @@ local function petCard(item, selectedPetId, onSelect, order, cardWidth, zIndex)
 	})
 end
 
-function PetInventoryOverlay.create(props)
+local function PetInventoryOverlayComponent(props)
 	local viewport = props.ViewportSize or Vector2.new(1280, 720)
 	local mobile = viewport.X < 600
 	local narrow = viewport.X < 390
@@ -64,6 +64,10 @@ function PetInventoryOverlay.create(props)
 		})
 	end
 	return Kit.modal({ Title = "Pet Inventory", MaximumWidth = width, MaximumHeight = height, ViewportSize = viewport, ZIndex = 80, OnClose = props.OnClose, Children = children })
+end
+
+function PetInventoryOverlay.create(props)
+	return React.createElement(PetInventoryOverlayComponent, props or {})
 end
 
 return PetInventoryOverlay
