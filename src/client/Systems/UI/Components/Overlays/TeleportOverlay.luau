@@ -20,7 +20,7 @@ local DESIGN_CONTENT_SIZE = Vector2.new(430, 430)
 local TEXT_COLOR = Color3.fromRGB(35, 35, 43)
 local SECTION_TITLE_TEXT_SIZE = 25
 local BODY_TEXT_SIZE = 18
-local ROW_HEIGHT = 58
+local ROW_HEIGHT = 64
 local ROW_GAP = 10
 local BUTTON_HOVER_SCALE = 1.04
 local BUTTON_PRESS_SCALE = 0.96
@@ -214,7 +214,7 @@ function TeleportOverlay.create(props)
 		OnClose = resolvedProps.OnClose,
 		Size = resolvedProps.Size or OVERLAY_SIZE,
 		Title = "Teleport",
-		TitleTextSize = 56,
+		TitleTextSize = 44,
 		TitleWidth = 350,
 		ViewportSize = resolvedProps.ViewportSize,
 		ZIndex = resolvedProps.ZIndex,

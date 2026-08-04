@@ -19,7 +19,7 @@ local GameOverlay = require(CommonComponents:WaitForChild("GameOverlay"))
 local RitualRushOverlay = {}
 
 local OVERLAY_SIZE = UDim2.fromScale(0.56, 0.74)
-local DESIGN_CONTENT_SIZE = Vector2.new(560, 490)
+local DESIGN_CONTENT_SIZE = Vector2.new(560, 620)
 local TEXT_COLOR = Color3.fromRGB(35, 35, 43)
 local MUTED_TEXT_COLOR = Color3.fromRGB(92, 88, 101)
 local POINT_COLOR = Color3.fromRGB(255, 92, 194)
@@ -28,7 +28,7 @@ local SUCCESS_COLOR = Color3.fromRGB(42, 199, 116)
 local WARNING_COLOR = Color3.fromRGB(218, 62, 62)
 local CLAIM_COLOR = Color3.fromRGB(37, 201, 255)
 local PREMIUM_LOCKED_TEXT_COLOR = Color3.fromRGB(116, 108, 124)
-local ROW_HEIGHT = 36
+local ROW_HEIGHT = 56
 local ROW_GAP = 4
 local BODY_TEXT_SIZE = 17
 local REWARD_ROW_INSET = 10
@@ -203,7 +203,7 @@ local function RewardButton(props)
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			Position = props.Position or UDim2.new(1, -REWARD_ROW_INSET, 0.5, 0),
-			Size = UDim2.fromOffset(props.Width or 112, 28),
+			Size = UDim2.fromOffset(props.Width or 112, 44),
 			Text = "",
 			ZIndex = 98,
 			[React.Event.Activated] = if isClaimable then function()
@@ -269,7 +269,7 @@ local function PremiumRewardInfo(props)
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Position = UDim2.new(1, -(FREE_BUTTON_WIDTH + ACTION_GAP + REWARD_ROW_INSET), 0.5, 0),
-		Size = UDim2.fromOffset(PREMIUM_INFO_WIDTH, 28),
+			Size = UDim2.fromOffset(PREMIUM_INFO_WIDTH, 44),
 		ZIndex = 97,
 	}, {
 		Label = createLabel(text, {
@@ -516,19 +516,25 @@ local function RitualRushOverlayComponent(props)
 			Progress = createProgressPanel(rush, nowUnix),
 			RewardTitle = createLabel("Rewards", {
 				Font = UIThemeConfig.Font,
-				Position = UDim2.fromOffset(0, 160),
+				Position = UDim2.fromOffset(0, 178),
 				Size = UDim2.new(1, 0, 0, 28),
 				TextColor3 = TEXT_COLOR,
 				TextSize = 24,
 				TextXAlignment = Enum.TextXAlignment.Center,
 				ZIndex = 96,
 			}),
-			Divider = createDivider(192),
-			RewardRows = React.createElement("Frame", {
+			Divider = createDivider(210),
+			RewardRows = React.createElement("ScrollingFrame", {
+				Active = true,
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(30, 206),
-				Size = UDim2.fromOffset(500, 280),
+				CanvasSize = UDim2.fromOffset(0, 0),
+				Position = UDim2.fromOffset(30, 224),
+				ScrollBarImageColor3 = CLAIM_COLOR,
+				ScrollBarImageTransparency = 0.2,
+				ScrollBarThickness = 6,
+				Size = UDim2.fromOffset(500, 370),
 				ZIndex = 96,
 			}, mergeProps({
 				Layout = React.createElement("UIListLayout", {
