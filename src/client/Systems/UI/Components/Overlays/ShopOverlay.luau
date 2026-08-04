@@ -20,8 +20,8 @@ local GameOverlay = require(CommonComponents:WaitForChild("GameOverlay"))
 
 local ShopOverlay = {}
 
-local OVERLAY_SIZE = UDim2.fromScale(0.58, 0.72)
-local DESIGN_CONTENT_SIZE = Vector2.new(620, 650)
+local OVERLAY_SIZE = UDim2.fromScale(0.62, 0.8)
+local DESIGN_CONTENT_SIZE = Vector2.new(620, 710)
 local TEXT_COLOR = Color3.fromRGB(35, 35, 43)
 local MUTED_TEXT_COLOR = Color3.fromRGB(92, 88, 101)
 local GEM_COLOR = Color3.fromRGB(255, 74, 214)
@@ -31,12 +31,12 @@ local BOOST_COLOR = Color3.fromRGB(42, 199, 116)
 local BODY_TEXT_SIZE = 17
 local SECTION_TITLE_TEXT_SIZE = 25
 local CARD_WIDTH = 178
-local CARD_HEIGHT = 118
+local CARD_HEIGHT = 132
 local CARD_GAP = 12
 local POTION_CARD_WIDTH = 246
-local POTION_CARD_HEIGHT = 128
+local POTION_CARD_HEIGHT = 148
 local POTION_BUTTON_WIDTH = 106
-local BUTTON_HEIGHT = 30
+local BUTTON_HEIGHT = 44
 local ICON_SIZE = 30
 local BUTTON_HOVER_SCALE = 1.04
 local BUTTON_PRESS_SCALE = 0.96
@@ -589,6 +589,19 @@ function ShopOverlay.create(props)
 	local purchaseStatus = resolvedProps.PurchaseStatus
 	local gemSection = ShopProductConfig.getSection(ShopProductConfig.SectionIds.GemPacks)
 
+	local contentChildren = {
+		Balance = createBalancePanel(snapshot, purchaseStatus),
+		GemTitle = createSectionTitle((gemSection and gemSection.DisplayName) or "Gems", 102),
+		GemDivider = createDivider(136),
+		Gems = createCardRow(getProductCards(ShopProductConfig.SectionIds.GemPacks, onProductActivated), 154),
+		FeaturedTitle = createSectionTitle("Featured", 300),
+		FeaturedDivider = createDivider(334),
+		Featured = createCardRow(getProductCards(ShopProductConfig.SectionIds.Featured, onProductActivated), 352),
+		OfferTitle = createSectionTitle("Potions", 500),
+		OfferDivider = createDivider(534),
+		Offers = createPotionRow(snapshot, onBuyPotion, onUsePotion, 552),
+	}
+
 	return GameOverlay.create({
 		BackgroundId = "RitualCore",
 		CloseButtonSize = 132,
@@ -597,21 +610,24 @@ function ShopOverlay.create(props)
 		OnClose = resolvedProps.OnClose,
 		Size = resolvedProps.Size or OVERLAY_SIZE,
 		Title = "Shop",
-		TitleTextSize = 58,
+		TitleTextSize = 46,
 		TitleWidth = 260,
 		ViewportSize = resolvedProps.ViewportSize,
 		ZIndex = resolvedProps.ZIndex,
 		Children = {
-			Balance = createBalancePanel(snapshot, purchaseStatus),
-			GemTitle = createSectionTitle((gemSection and gemSection.DisplayName) or "Gems", 102),
-			GemDivider = createDivider(136),
-			Gems = createCardRow(getProductCards(ShopProductConfig.SectionIds.GemPacks, onProductActivated), 154),
-			FeaturedTitle = createSectionTitle("Featured", 286),
-			FeaturedDivider = createDivider(320),
-			Featured = createCardRow(getProductCards(ShopProductConfig.SectionIds.Featured, onProductActivated), 326),
-			OfferTitle = createSectionTitle("Potions", 458),
-			OfferDivider = createDivider(492),
-			Offers = createPotionRow(snapshot, onBuyPotion, onUsePotion, 510),
+			Scroll = React.createElement("ScrollingFrame", {
+				Active = true,
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				CanvasSize = UDim2.fromOffset(0, 0),
+				Position = UDim2.fromOffset(18, 8),
+				ScrollBarImageColor3 = RUSH_COLOR,
+				ScrollBarImageTransparency = 0.2,
+				ScrollBarThickness = 6,
+				Size = UDim2.new(1, -36, 1, -16),
+				ZIndex = 95,
+			}, contentChildren),
 		},
 	})
 end
