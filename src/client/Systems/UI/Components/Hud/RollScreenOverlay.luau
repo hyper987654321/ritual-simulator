@@ -19,13 +19,14 @@ local HudIconBar = require(CommonComponents:WaitForChild("HudIconBar"))
 local HudLayoutConfig = require(script.Parent:WaitForChild("HudLayoutConfig"))
 local HudPrimitives = require(CommonComponents:WaitForChild("HudPrimitives"))
 local PetViewport = require(CommonComponents:WaitForChild("PetViewport"))
+local Surface = require(script.Parent.Parent:WaitForChild("Foundation"):WaitForChild("Surface"))
+local Icon = require(script.Parent.Parent:WaitForChild("Foundation"):WaitForChild("Icon"))
 
 local RollScreenOverlay = {}
 
 local PET_VIEWPORT_ASPECT_RATIO = 1.48
 local PET_VIEWPORT_CAMERA_PADDING = 1.05
-local ROLL_SCREEN_ACTION_GAP = 520
-local ROLL_SCREEN_ACTION_POSITION = UDim2.fromScale(0.5, 0.82)
+local ROLL_SCREEN_ACTION_POSITION = UDim2.fromScale(0.5, 0.84)
 local AUTO_ROLL_ICON_ROTATION_DEGREES_PER_SECOND = 180
 local AUTO_ROLL_ICON_PIVOT_Y_OFFSET = 3
 local ROLL_ROULETTE_WIDTH = 1000
@@ -699,28 +700,12 @@ local function RollScreenActions(props)
 		end
 	end, { autoRollEnabled })
 
-	return HudIconBar.create({
-		{
-			Name = "AutoRoll",
-			IconId = "AutoRoll",
-			LabelText = if autoRollEnabled then "Auto Roll: On" else "Auto Roll: Off",
-			Activated = props.OnToggleAutoRoll,
-			IconColor3 = if autoRollEnabled then Color3.fromRGB(65, 255, 155) else nil,
-			IconPivotYOffset = AUTO_ROLL_ICON_PIVOT_Y_OFFSET,
-			IconRotation = if autoRollEnabled then iconRotation else 0,
-		},
-		{
-			Name = "HideAutoRoll",
-			IconId = "RollViewHidden",
-			LabelText = "Hide Rolls",
-			Activated = props.OnHide,
-		},
-	}, {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		IconGap = ROLL_SCREEN_ACTION_GAP,
-		Position = ROLL_SCREEN_ACTION_POSITION,
-		ZIndex = 60,
-	}, Enum.FillDirection.Horizontal, 1)
+	return Surface.panel({ AnchorPoint = Vector2.new(0.5, 0.5), Position = ROLL_SCREEN_ACTION_POSITION, Size = UDim2.fromOffset(320, 64), ZIndex = 60 }, {
+		Padding = React.createElement("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8) }),
+		Layout = React.createElement("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center, Padding = UDim.new(0, 8), VerticalAlignment = Enum.VerticalAlignment.Center }),
+		Auto = Surface.button(if autoRollEnabled then "Auto Roll: On" else "Auto Roll: Off", { BackgroundColor3 = if autoRollEnabled then UIThemeConfig.Colors.Success else UIThemeConfig.Colors.Card, LayoutOrder = 1, Size = UDim2.fromOffset(180, 44), [React.Event.Activated] = props.OnToggleAutoRoll }, { Icon = Icon.create("AutoRoll", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 8, 0.5, 0), Size = UDim2.fromOffset(24, 24), TextSize = 20, ZIndex = 61 }) }),
+		Hide = Surface.button("Hide", { BackgroundColor3 = UIThemeConfig.Colors.Card, LayoutOrder = 2, Size = UDim2.fromOffset(92, 44), [React.Event.Activated] = props.OnHide }, { Icon = Icon.create("Close", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 8, 0.5, 0), Size = UDim2.fromOffset(20, 20), TextSize = 18, ZIndex = 61 }) }),
+	})
 end
 
 function RollScreenOverlay.create(props)

@@ -6,7 +6,6 @@ local React = require(Packages:WaitForChild("React"))
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 
-local UIBackgroundConfig = require(Config:WaitForChild("UIBackgroundConfig"))
 local UIThemeConfig = require(Config:WaitForChild("UIThemeConfig"))
 
 local OverlayPanel = require(script.Parent:WaitForChild("OverlayPanel"))
@@ -96,23 +95,8 @@ local function getScaledPanelSize(designContentSize, contentScale)
 	)
 end
 
-local function createBackgroundImage(backgroundId)
-	local backgroundImage = if backgroundId ~= nil then UIBackgroundConfig.getBackground(backgroundId) else nil
-
-	if backgroundImage == nil or backgroundImage == "" then
-		return nil
-	end
-
-	return React.createElement("ImageLabel", {
-		Active = false,
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		Image = backgroundImage,
-		Position = UDim2.fromScale(0, 0),
-		ScaleType = Enum.ScaleType.Crop,
-		Size = UDim2.fromScale(1, 1),
-		ZIndex = 91,
-	})
+local function createBackgroundImage(_backgroundId)
+	return nil
 end
 
 local function createScaledContent(contentScale, designContentSize, children)
@@ -150,13 +134,12 @@ local function createScaledTitle(contentScale, designContentSize, props)
 			Scale = contentScale,
 		}),
 		Title = createLabel(titleText, mergeProps({
-			Font = UIThemeConfig.Font,
-			Position = UDim2.fromOffset(-14, -42),
-			Size = UDim2.fromOffset(props.TitleWidth or 360, 76),
+			Font = UIThemeConfig.FontBold,
+			Position = UDim2.fromOffset(16, 12),
+			Size = UDim2.fromOffset(props.TitleWidth or 360, 32),
 			TextColor3 = Color3.fromRGB(255, 255, 255),
-			TextSize = props.TitleTextSize or 64,
-			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
-			TextStrokeTransparency = 0,
+			TextSize = props.TitleTextSize or UIThemeConfig.Type.Title,
+			TextStrokeTransparency = 1,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 96,
 		}, props.TitleProps), {
@@ -179,14 +162,14 @@ function GameOverlay.create(props)
 	local closeIconSize = resolvedProps.CloseIconSize or DEFAULT_CLOSE_ICON_SIZE
 
 	return OverlayPanel.create({
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-		BackgroundTransparency = 0,
-		BorderColor3 = Color3.fromRGB(0, 0, 0),
-		BorderThickness = getScaledOffset(PANEL_BORDER_THICKNESS, contentScale, MIN_PANEL_BORDER_THICKNESS),
+		BackgroundColor3 = UIThemeConfig.Colors.Panel,
+		BackgroundTransparency = UIThemeConfig.PanelTransparency,
+		BorderColor3 = UIThemeConfig.Colors.Stroke,
+		BorderThickness = 1,
 		BorderTransparency = 0,
 		CloseButtonSize = getScaledOffset(closeButtonSize, contentScale, MIN_CLOSE_BUTTON_SIZE),
 		CloseIconSize = getScaledOffset(closeIconSize, contentScale, MIN_CLOSE_ICON_SIZE),
-		CornerRadius = getScaledOffset(PANEL_CORNER_RADIUS, contentScale, MIN_PANEL_CORNER_RADIUS),
+		CornerRadius = 12,
 		OnClose = resolvedProps.OnClose,
 		Size = getScaledPanelSize(designContentSize, contentScale),
 		ZIndex = resolvedProps.ZIndex or 90,

@@ -6,8 +6,8 @@ local React = require(Packages:WaitForChild("React"))
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 
-local UIIconConfig = require(Config:WaitForChild("UIIconConfig"))
 local AnimatedScaleButton = require(script.Parent:WaitForChild("AnimatedScaleButton"))
+local Icon = require(script.Parent.Parent:WaitForChild("Foundation"):WaitForChild("Icon"))
 
 local OverlayPanel = {}
 
@@ -15,11 +15,11 @@ local DEFAULT_SIZE = UDim2.fromOffset(560, 420)
 local DEFAULT_POSITION = UDim2.fromScale(0.5, 0.5)
 local DEFAULT_ANCHOR_POINT = Vector2.new(0.5, 0.5)
 local DEFAULT_Z_INDEX = 80
-local CLOSE_BUTTON_SIZE = 168
-local CLOSE_ICON_SIZE = 140
-local CLOSE_BUTTON_POSITION = UDim2.fromScale(1, 0)
-local CLOSE_BUTTON_HOVER_SCALE = 1.08
-local CLOSE_BUTTON_PRESS_SCALE = 0.92
+local CLOSE_BUTTON_SIZE = 40
+local CLOSE_ICON_SIZE = 24
+local CLOSE_BUTTON_POSITION = UDim2.new(1, -28, 0, 32)
+local CLOSE_BUTTON_HOVER_SCALE = 1.02
+local CLOSE_BUTTON_PRESS_SCALE = 0.98
 local CLOSE_BUTTON_HOVER_TWEEN_INFO = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local CLOSE_BUTTON_REST_TWEEN_INFO = TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
@@ -79,17 +79,7 @@ function OverlayPanel.create(props)
 				[React.Event.Activated] = resolvedProps.OnClose,
 			},
 			Children = {
-				Icon = React.createElement("ImageLabel", {
-					Active = false,
-					AnchorPoint = Vector2.new(0.5, 0.5),
-					BackgroundTransparency = 1,
-					Image = UIIconConfig.getIcon("Close") or "",
-					ImageColor3 = Color3.fromRGB(255, 255, 255),
-					Position = UDim2.fromScale(0.5, 0.5),
-					ScaleType = Enum.ScaleType.Fit,
-					Size = UDim2.fromOffset(closeIconSize, closeIconSize),
-					ZIndex = zIndex + 21,
-				}),
+				Icon = Icon.create("Close", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(closeIconSize, closeIconSize), TextSize = 22, ZIndex = zIndex + 21 }),
 			},
 		})
 	end

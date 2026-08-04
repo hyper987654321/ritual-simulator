@@ -1,178 +1,55 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local Packages = ReplicatedStorage:WaitForChild("Packages")
-local React = require(Packages:WaitForChild("React"))
-
-local Config = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config")
-local UIIconConfig = require(Config:WaitForChild("UIIconConfig"))
-local UIThemeConfig = require(Config:WaitForChild("UIThemeConfig"))
+local React = require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("React"))
+local Theme = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("UIThemeConfig"))
+local Surface = require(script.Parent.Parent:WaitForChild("Foundation"):WaitForChild("Surface"))
+local Icon = require(script.Parent.Parent:WaitForChild("Foundation"):WaitForChild("Icon"))
 
 local HudBottomNav = {}
+local C = Theme.Colors
 
-local COLORS = {
-	Panel = Color3.fromRGB(19, 16, 31),
-	PanelEdge = Color3.fromRGB(111, 86, 176),
-	Text = Color3.fromRGB(231, 226, 250),
-	Muted = Color3.fromRGB(164, 156, 193),
-	Violet = Color3.fromRGB(120, 91, 220),
-	Gold = Color3.fromRGB(255, 207, 104),
-	Cyan = Color3.fromRGB(106, 224, 239),
-}
-
-local function corner(radius)
-	return React.createElement("UICorner", { CornerRadius = UDim.new(0, radius) })
-end
-
-local function stroke(color, transparency)
-	return React.createElement("UIStroke", { Color = color, Transparency = transparency, Thickness = 1 })
-end
-
-local function iconButton(item, isPrimary, zIndex)
-	local height = if isPrimary then 68 else 54
-	local children = {
-		Icon = React.createElement("ImageLabel", {
-			Active = false,
-			AnchorPoint = Vector2.new(0.5, 0),
-			BackgroundTransparency = 1,
-			Image = UIIconConfig.getIcon(item.IconId) or "",
-			ImageColor3 = if isPrimary then COLORS.Gold else COLORS.Cyan,
-			Position = UDim2.fromScale(0.5, 0.08),
-			ScaleType = Enum.ScaleType.Fit,
-			Size = UDim2.fromOffset(if isPrimary then 30 else 24, if isPrimary then 30 else 24),
-			ZIndex = zIndex + 1,
-		}),
-		Label = React.createElement("TextLabel", {
-			AnchorPoint = Vector2.new(0.5, 1),
-			BackgroundTransparency = 1,
-			Font = UIThemeConfig.Font,
-			Position = UDim2.new(0.5, 0, 1, -5),
-			Size = UDim2.new(1, -4, 0, 19),
-			Text = item.Label,
-			TextColor3 = if isPrimary then COLORS.Gold else COLORS.Text,
-			TextSize = if isPrimary then 15 else 12,
-			TextXAlignment = Enum.TextXAlignment.Center,
-			TextYAlignment = Enum.TextYAlignment.Center,
-			ZIndex = zIndex + 1,
-		}),
-	}
-
+local function createSlot(item, width, zIndex)
+	local selected = item.Selected == true
 	return React.createElement("TextButton", {
-		AutoButtonColor = true,
-		BackgroundColor3 = if isPrimary then COLORS.Violet else Color3.fromRGB(31, 26, 50),
-		BorderSizePixel = 0,
-		LayoutOrder = item.Order,
-		Size = UDim2.fromOffset(item.Width, height),
-		Text = "",
-		[React.Event.Activated] = item.Activated,
-		ZIndex = zIndex,
-	}, children, {
-		Corner = corner(12),
-		Edge = stroke(if isPrimary then COLORS.Gold else COLORS.PanelEdge, if isPrimary then 0.2 else 0.45),
+		Active = true, AutoButtonColor = true, BackgroundColor3 = if selected then C.Violet else C.Card,
+		BackgroundTransparency = if selected then 0.05 else 0.2, BorderSizePixel = 0, LayoutOrder = item.Order,
+		Size = UDim2.fromOffset(width, 52), Text = "", [React.Event.Activated] = item.Activated, ZIndex = zIndex,
+	}, {
+		Corner = Surface.corner(Theme.Radius.Control), Stroke = Surface.stroke(if selected then C.Cyan else C.Stroke, if selected then 0.2 else 0.7),
+		Icon = Icon.create(item.IconId, { AnchorPoint = Vector2.new(0.5, 0), ImageColor3 = if selected then C.Ink else C.Muted, Position = UDim2.new(0.5, 0, 0, 6), Size = UDim2.fromOffset(24, 24), TextSize = 22, ZIndex = zIndex + 1 }),
+		Label = Surface.label(item.Label, { Font = if selected then Theme.FontBold else Theme.Font, Position = UDim2.new(0, 2, 1, -22), Size = UDim2.new(1, -4, 0, 18), TextColor3 = if selected then C.Ink else C.Muted, TextSize = Theme.Type.Caption, TextXAlignment = Enum.TextXAlignment.Center, ZIndex = zIndex + 1 }),
 	})
-end
-
-local function menuButton(item, order, zIndex)
-	return React.createElement("TextButton", {
-		AutoButtonColor = true,
-		BackgroundColor3 = Color3.fromRGB(35, 29, 56),
-		BorderSizePixel = 0,
-		LayoutOrder = order,
-		Size = UDim2.new(0.5, -4, 0, 44),
-		Text = item.Label,
-		TextColor3 = COLORS.Text,
-		Font = UIThemeConfig.Font,
-		TextSize = 12,
-		[React.Event.Activated] = item.Activated,
-		ZIndex = zIndex,
-	}, { Corner = corner(8), Edge = stroke(COLORS.PanelEdge, 0.55) })
 end
 
 function HudBottomNav.create(props)
 	local resolved = props or {}
-	local menuOpen = resolved.MenuOpen == true
 	local viewport = resolved.ViewportSize or Vector2.new(1280, 720)
-	local width = math.min(viewport.X - 20, 470)
-	local scale = math.clamp(math.min(viewport.Y / 760, 1), 0.82, 1)
+	local mobile = viewport.X < 600
+	local width = math.clamp(viewport.X - 24, 300, if mobile then 520 else 520)
+	local slotWidth = math.floor((width - 32) / 5)
 	local zIndex = resolved.ZIndex or 60
-	local availableWidth = width - 24
-	local normalWidth = math.min(72, math.floor((availableWidth - 100) / 4))
-	local primaryWidth = availableWidth - normalWidth * 4
-	local moreItems = {
-		{ Label = "Shop", Activated = resolved.OnShop },
-		{ Label = "Rush", Activated = resolved.OnRitualRush },
-		{ Label = "Rebirth", Activated = resolved.OnRebirth },
-		{ Label = "Daily", Activated = resolved.OnRetention },
-		{ Label = "Boards", Activated = resolved.OnLeaderboard },
-		{ Label = "Friends", Activated = resolved.OnSocial },
-	}
 	local controls = {
-		{ Label = "Pets", IconId = "PetInventory", Order = 1, Width = normalWidth, Activated = resolved.OnPets },
-		{ Label = "Roll", IconId = "RollDice", Order = 2, Width = primaryWidth, Activated = resolved.OnRoll },
-		{ Label = "Ritual", IconId = "RitualCore", Order = 3, Width = normalWidth, Activated = resolved.OnRitual },
-		{ Label = "Zones", IconId = "Teleporter", Order = 4, Width = normalWidth, Activated = resolved.OnZones },
-		{ Label = "More", IconId = "Shop", Order = 5, Width = normalWidth, Activated = resolved.OnToggleMore },
+		{ Label = "Pets", IconId = "Pets", Order = 1, Activated = resolved.OnPets },
+		{ Label = "Roll", IconId = "RollDice", Order = 2, Activated = resolved.OnRoll, Selected = resolved.RollOnly },
+		{ Label = "Ritual", IconId = "RitualCore", Order = 3, Activated = resolved.OnRitual },
+		{ Label = "Zones", IconId = "Zones", Order = 4, Activated = resolved.OnZones },
+		{ Label = "More", IconId = "More", Order = 5, Activated = resolved.OnToggleMore },
 	}
-	if resolved.RollOnly == true then
-		controls = {
-			{ Label = "Roll", IconId = "RollDice", Order = 1, Width = primaryWidth, Activated = resolved.OnRoll },
+	local children = { Corner = Surface.corner(Theme.Radius.Dock), Stroke = Surface.stroke(C.Stroke, 0.25), Padding = React.createElement("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8) }), Layout = React.createElement("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, VerticalAlignment = Enum.VerticalAlignment.Center }) }
+	for _, item in ipairs(controls) do children[item.Label] = createSlot(item, slotWidth, zIndex + 1) end
+	if resolved.MenuOpen then
+		local menuItems = {
+			{ Label = "Shop", Activated = resolved.OnShop }, { Label = "Daily", Activated = resolved.OnDaily }, { Label = "Friends", Activated = resolved.OnSocial },
+			{ Label = "Rush", Activated = resolved.OnRitualRush }, { Label = "Rebirth", Activated = resolved.OnRebirth }, { Label = "Boards", Activated = resolved.OnLeaderboard },
 		}
+		local menuChildren = { Layout = React.createElement("UIGridLayout", { CellPadding = UDim2.fromOffset(8, 8), CellSize = UDim2.new(0.5, -4, 0, 36), SortOrder = Enum.SortOrder.LayoutOrder }) }
+		for index, item in ipairs(menuItems) do menuChildren["Item" .. index] = Surface.button(item.Label, { BackgroundColor3 = C.Card, LayoutOrder = index, TextSize = Theme.Type.Caption, [React.Event.Activated] = item.Activated, ZIndex = zIndex + 4 }) end
+		children.MoreMenu = React.createElement("Frame", { AnchorPoint = Vector2.new(0.5, 1), BackgroundColor3 = C.Panel, BorderSizePixel = 0, Position = UDim2.new(0.5, 0, 0, -8), Size = UDim2.fromOffset(math.min(width, 320), 196), ZIndex = zIndex + 3 }, {
+			Corner = Surface.corner(Theme.Radius.Panel), Stroke = Surface.stroke(C.Stroke, 0.25), Padding = React.createElement("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12) }),
+			Title = Surface.label("More", { Size = UDim2.new(1, 0, 0, 24), TextColor3 = C.Muted, TextSize = Theme.Type.Caption, ZIndex = zIndex + 4 }),
+			Items = React.createElement("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 32), Size = UDim2.new(1, 0, 1, -32), ZIndex = zIndex + 4 }, menuChildren),
+		})
 	end
-
-	local menuChildren = {
-		Layout = React.createElement("UIGridLayout", {
-			CellPadding = UDim2.fromOffset(8, 8),
-			CellSize = UDim2.new(0.5, -4, 0, 44),
-			SortOrder = Enum.SortOrder.LayoutOrder,
-		}),
-	}
-	for index, item in ipairs(moreItems) do
-		menuChildren["Item" .. tostring(index)] = menuButton(item, index, zIndex + 2)
-	end
-
-	local navChildren = {
-		Scale = React.createElement("UIScale", { Scale = scale }),
-		Layout = React.createElement("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			Padding = UDim.new(0, 6),
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-		}),
-	}
-	for _, item in ipairs(controls) do
-		navChildren[item.Label] = iconButton(item, item.Label == "Roll", zIndex + 1)
-	end
-
-	return React.createElement("Frame", {
-		AnchorPoint = Vector2.new(0.5, 1),
-		BackgroundColor3 = COLORS.Panel,
-		BackgroundTransparency = 0.08,
-		BorderSizePixel = 0,
-		Position = UDim2.new(0.5, 0, 1, -12),
-		Size = UDim2.fromOffset(width, 78),
-		ZIndex = zIndex,
-	}, {
-		Corner = corner(16),
-		Edge = stroke(COLORS.PanelEdge, 0.3),
-		Navigation = React.createElement("Frame", {
-			BackgroundTransparency = 1,
-			Size = UDim2.fromScale(1, 1),
-			ZIndex = zIndex + 1,
-		}, navChildren),
-		MoreMenu = if menuOpen then React.createElement("Frame", {
-			AnchorPoint = Vector2.new(0.5, 1),
-			BackgroundColor3 = COLORS.Panel,
-			BorderSizePixel = 0,
-			Position = UDim2.new(0.5, 0, 0, -10),
-			Size = UDim2.fromOffset(math.min(width, 300), 156),
-			ZIndex = zIndex + 2,
-		}, {
-			Corner = corner(12),
-			Edge = stroke(COLORS.PanelEdge, 0.25),
-			Padding = React.createElement("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10) }),
-			Items = React.createElement("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1) }, menuChildren),
-		}) else nil,
-	})
+	return React.createElement("Frame", { AnchorPoint = Vector2.new(0.5, 1), BackgroundColor3 = C.Panel, BackgroundTransparency = Theme.PanelTransparency, BorderSizePixel = 0, Position = UDim2.new(0.5, 0, 1, -12), Size = UDim2.fromOffset(width, 68), ZIndex = zIndex }, children)
 end
 
 return HudBottomNav
