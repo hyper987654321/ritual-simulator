@@ -136,6 +136,10 @@ local function ComponentGallery(props)
 			BackgroundTransparency = 1,
 			ZIndex = 2,
 		}, {
+			Layout = React.createElement("UIListLayout", {
+				Padding = UDim.new(0, 12),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
 			One = card("GalleryCardOne", "Token roles", "Violet / Cyan / Gold", C.Violet, 1),
 			Two = card("GalleryCardTwo", "Spacing", "4 / 8 / 12 / 16 / 24 / 32", C.Cyan, 2),
 			Three = card("GalleryCardThree", "Radius", "8 controls / 12 panels", C.Gold, 3),
