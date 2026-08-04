@@ -41,6 +41,19 @@ function Kit.modal(props)
 	children.Title = Kit.label(props.Title, { Position = UDim2.fromOffset(22, 18), Size = UDim2.new(1, -92, 0, 38), TextSize = if mobile then 23 else 28, ZIndex = z + 2 })
 	children.Close = Kit.button("×", { AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1, Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(44, 44), TextColor3 = C.Muted, TextSize = 28, ZIndex = z + 3, [React.Event.Activated] = props.OnClose })
 	children.Rule = React.createElement("Frame", { BackgroundColor3 = C.Accent, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 62), Size = UDim2.new(1, -44, 0, 2), ZIndex = z + 2 })
+	children.Close = React.createElement("ImageButton", {
+		Active = true,
+		AnchorPoint = Vector2.new(1, 0),
+		AutoButtonColor = true,
+		BackgroundTransparency = 1,
+		Image = UIIconConfig.getIcon("Close") or "",
+		ImageColor3 = C.Muted,
+		Position = UDim2.new(1, -10, 0, 10),
+		ScaleType = Enum.ScaleType.Fit,
+		Size = UDim2.fromOffset(44, 44),
+		ZIndex = z + 3,
+		[React.Event.Activated] = props.OnClose,
+	})
 	return React.createElement("Frame", { Active = true, AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = C.Panel, BorderSizePixel = 0, Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(width, height), ZIndex = z }, children)
 end
 
