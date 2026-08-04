@@ -14,6 +14,7 @@ local WorldService = {}
 
 local WORLD_FOLDER_NAME = MapGenConfig.OutputFolderName
 local TEMPORARY_WORLD_FOLDER_NAME = "__RitualWorldBuild"
+local PUBLISH_WORLD_FOLDER_NAME = "__RitualWorldPublish"
 local hasStarted = false
 
 local function describeErrors(errors)
@@ -29,27 +30,42 @@ local function buildAndPublishFallback()
 	local existing = Workspace:FindFirstChild(WORLD_FOLDER_NAME)
 
 	if existing ~= nil then
-		validateWorld(existing, "existing canonical world is incomplete")
-		return existing
+		local valid = RitualWorldContract.isValid(existing)
+
+		if valid then
+			return existing
+		end
 	end
 
 	local existingTemporary = ServerStorage:FindFirstChild(TEMPORARY_WORLD_FOLDER_NAME)
 	assert(existingTemporary == nil, "temporary world build already exists")
+	local existingPublish = ServerStorage:FindFirstChild(PUBLISH_WORLD_FOLDER_NAME)
+	assert(existingPublish == nil, "publish world build already exists")
 
 	local temporary = nil
+	local published = nil
 	local ok, result = pcall(function()
 		temporary = CodeNativeWorldProvider.build(ServerStorage, TEMPORARY_WORLD_FOLDER_NAME)
 		validateWorld(temporary, "temporary world build is invalid")
 
-		local published = temporary:Clone()
-		published.Name = WORLD_FOLDER_NAME
+		published = temporary:Clone()
+		published.Name = PUBLISH_WORLD_FOLDER_NAME
 		validateWorld(published, "published world clone is invalid")
+
+		if existing ~= nil then
+			existing:Destroy()
+		end
+
+		published.Name = WORLD_FOLDER_NAME
 		published.Parent = Workspace
 		return published
 	end)
 
 	if temporary ~= nil and temporary.Parent ~= nil then
 		temporary:Destroy()
+	end
+	if not ok and published ~= nil and published.Parent ~= nil then
+		published:Destroy()
 	end
 
 	assert(ok, result)
