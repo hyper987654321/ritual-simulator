@@ -33,6 +33,7 @@ local RebirthOverlay = require(OverlayComponents:WaitForChild("RebirthOverlay"))
 local RitualCoreOverlay = require(OverlayComponents:WaitForChild("RitualCoreOverlay"))
 local RitualRushOverlay = require(OverlayComponents:WaitForChild("RitualRushOverlay"))
 local RollScreenOverlay = require(HudComponents:WaitForChild("RollScreenOverlay"))
+local RunePanel = require(HudComponents:WaitForChild("RunePanel"))
 local ShopOverlay = require(OverlayComponents:WaitForChild("ShopOverlay"))
 local TeleportOverlay = require(OverlayComponents:WaitForChild("TeleportOverlay"))
 local TutorialOverlay = require(HudComponents:WaitForChild("TutorialOverlay"))
@@ -182,6 +183,7 @@ end
 
 local function HudApp()
 	local snapshot, setSnapshot = React.useState(ClientStateStore.getSnapshot())
+	local feedback, setFeedback = React.useState(ClientStateStore.getFeedback())
 	local rollActions = useRollActions({
 		BuildRollRouletteTrack = RollScreenOverlay.buildRollRouletteTrack,
 		GetRollAnimationDurationScale = RollScreenOverlay.getRollAnimationDurationScale,
@@ -189,10 +191,10 @@ local function HudApp()
 		GetRollPreviewData = RollScreenOverlay.getRollPreviewData,
 		GetRollRouletteTargetOffset = RollScreenOverlay.getRollRouletteTargetOffset,
 		GetSnapshot = ClientStateStore.getSnapshot,
+		ProgressionEpoch = if typeof(snapshot) == "table" then snapshot.ProgressionEpoch else nil,
 		RollPet = ClientStateStore.rollPet,
 	})
 	local autoRollEnabled = rollActions.AutoRollEnabled
-	local autoRollIconRotation = rollActions.AutoRollIconRotation
 	local rollAnimation = rollActions.RollAnimation
 	local rollScreenOpen, setRollScreenOpen = React.useState(false)
 	local hideRollAnimation, setHideRollAnimation = React.useState(false)
@@ -204,6 +206,12 @@ local function HudApp()
 	React.useEffect(function()
 		return ClientStateStore.subscribe(function(nextSnapshot)
 			setSnapshot(nextSnapshot)
+		end)
+	end, {})
+
+	React.useEffect(function()
+		return ClientStateStore.subscribeFeedback(function(nextFeedback)
+			setFeedback(nextFeedback)
 		end)
 	end, {})
 
@@ -361,6 +369,12 @@ local function HudApp()
 		end)
 	end
 
+	local function setAutoCapacity(enabled)
+		runServerAction(function()
+			return ClientStateStore.setAutoCapacity(enabled)
+		end)
+	end
+
 	local function rebirth()
 		runServerAction(function()
 			return ClientStateStore.rebirth()
@@ -379,6 +393,12 @@ local function HudApp()
 		end)
 	end
 
+	local function buyAscensionUpgrade(upgradeId)
+		runServerAction(function()
+			return ClientStateStore.buyAscensionUpgrade(upgradeId)
+		end)
+	end
+
 	local function selectZone(zoneId)
 		runServerAction(function()
 			return ClientStateStore.selectZone(zoneId)
@@ -386,8 +406,31 @@ local function HudApp()
 	end
 
 	local function claimRitualRushReward(milestoneId)
+		local ritualRush = if typeof(snapshot) == "table" and typeof(snapshot.RitualRush) == "table"
+			then snapshot.RitualRush
+			else nil
+		local selectedTrack = nil
+
+		if ritualRush ~= nil and typeof(ritualRush.Milestones) == "table" then
+			for _, milestone in ipairs(ritualRush.Milestones) do
+				if typeof(milestone) == "table" and milestone.MilestoneId == milestoneId then
+					if milestone.IsFreeClaimed ~= true then
+						selectedTrack = "free"
+					elseif ritualRush.PremiumUnlocked == true and milestone.IsPremiumClaimed ~= true then
+						selectedTrack = "premium"
+					end
+
+					break
+				end
+			end
+		end
+
+		if selectedTrack == nil then
+			return
+		end
+
 		runServerAction(function()
-			return ClientStateStore.claimRitualRushReward(milestoneId)
+			return ClientStateStore.claimRitualRushReward(milestoneId, selectedTrack)
 		end)
 	end
 
@@ -400,6 +443,12 @@ local function HudApp()
 	local function buyPotionWithGems(potionId)
 		runServerAction(function()
 			return ClientStateStore.buyPotionWithGems(potionId)
+		end)
+	end
+
+	local function selectRuneFocus(focusId)
+		runServerAction(function()
+			return ClientStateStore.selectRuneFocus(focusId)
 		end)
 	end
 
@@ -448,6 +497,12 @@ local function HudApp()
 
 		StatsPanel = if not rollScreenVisible then createStatsPanel(snapshot, zoneName) else nil,
 
+		RunePanel = if not rollScreenVisible then RunePanel.create({
+			Feedback = feedback,
+			OnSelectRuneFocus = selectRuneFocus,
+			Snapshot = snapshot,
+		}) else nil,
+
 		CurrencyDisplay = if not rollScreenVisible then createCurrencyDisplay(snapshot, hudControlScale) else nil,
 
 		ActiveBoostsDisplay = if not rollScreenVisible then ActiveBoostsDisplay.create({
@@ -478,6 +533,7 @@ local function HudApp()
 				Snapshot = snapshot,
 				OnClose = closeOverlay,
 				OnBuyUpgrade = buyUpgrade,
+				OnSetAutoCapacity = setAutoCapacity,
 				ViewportSize = viewportSize,
 			})
 			else nil,
@@ -504,6 +560,7 @@ local function HudApp()
 			then AscensionOverlay.create({
 				Snapshot = snapshot,
 				OnAscend = ascend,
+				OnBuyAscensionUpgrade = buyAscensionUpgrade,
 				OnClose = closeOverlay,
 				ViewportSize = viewportSize,
 			})
@@ -520,7 +577,6 @@ local function HudApp()
 
 		RollScreenContent = if rollScreenVisible then RollScreenOverlay.create({
 			AutoRollEnabled = autoRollEnabled,
-			AutoRollIconRotation = autoRollIconRotation,
 			OnHide = hideRollScreen,
 			OnToggleAutoRoll = rollActions.ToggleAutoRoll,
 			RollAnimation = rollAnimation,

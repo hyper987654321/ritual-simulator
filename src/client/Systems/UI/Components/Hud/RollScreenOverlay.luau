@@ -1,11 +1,14 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
+local Util = Shared:WaitForChild("Util")
 
+local NumberFormatter = require(Util:WaitForChild("NumberFormatter"))
 local PetConfig = require(Config:WaitForChild("PetConfig"))
 local RitualStoneConfig = require(Config:WaitForChild("RitualStoneConfig"))
 local UIThemeConfig = require(Config:WaitForChild("UIThemeConfig"))
@@ -23,6 +26,7 @@ local PET_VIEWPORT_ASPECT_RATIO = 1.48
 local PET_VIEWPORT_CAMERA_PADDING = 1.05
 local ROLL_SCREEN_ACTION_GAP = 520
 local ROLL_SCREEN_ACTION_POSITION = UDim2.fromScale(0.5, 0.82)
+local AUTO_ROLL_ICON_ROTATION_DEGREES_PER_SECOND = 180
 local AUTO_ROLL_ICON_PIVOT_Y_OFFSET = 3
 local ROLL_ROULETTE_WIDTH = 1000
 local ROLL_ROULETTE_HEIGHT = 250
@@ -32,6 +36,7 @@ local ROLL_ROULETTE_CARD_GAP = 10
 local ROLL_ROULETTE_POSITION = UDim2.fromScale(0.5, 0.32)
 local ROLL_RESULT_NUMBER_POSITION = UDim2.fromScale(0.5, 0.58)
 local ROLL_RESULT_NAME_POSITION = UDim2.fromScale(0.5, 0.67)
+local ROLL_RESULT_POWER_POSITION = UDim2.fromScale(0.5, 0.725)
 local ROLL_ROULETTE_CARD_COUNT = 28
 local ROLL_ROULETTE_TARGET_INDEX = 23
 local ROLL_ROULETTE_TARGET_INDEX_MIN = 21
@@ -49,16 +54,74 @@ local rollVisualRandom = Random.new()
 
 RollScreenOverlay.ScrimTransparency = 0.42
 
-local function getRollPreviewEntries(snapshot)
-	if snapshot == nil then
-		return {}
+local function isFinitePositiveNumber(value)
+	return typeof(value) == "number" and value == value and math.abs(value) ~= math.huge and value > 0
+end
+
+local function getVisualPetInfo(entry, isLegacyFallback)
+	if typeof(entry) ~= "table" or typeof(entry.PetId) ~= "string" then
+		return nil
 	end
 
-	local preview = PetConfig.getRollPreview()
+	local pet = PetConfig.getPet(entry.PetId)
+
+	if pet == nil then
+		return nil
+	end
+
+	local chance = if isFinitePositiveNumber(entry.AdjustedChance)
+		then entry.AdjustedChance
+		else entry.Chance
+	local oddsText = if typeof(entry.OddsText) == "string" and entry.OddsText ~= ""
+		then entry.OddsText
+		elseif isFinitePositiveNumber(chance) then PetConfig.getChanceOddsText(chance) else "-"
+
+	if isLegacyFallback and oddsText ~= "-" and string.sub(oddsText, 1, 5) ~= "Base " then
+		oddsText = "Base " .. oddsText
+	end
+
+	local power = entry.Power
+
+	if typeof(power) ~= "number" or power ~= power or math.abs(power) == math.huge or power < 0 then
+		power = if isLegacyFallback then PetConfig.getPetPower(entry.PetId) else nil
+	end
+
+	return {
+		PetId = entry.PetId,
+		DisplayName = if typeof(entry.DisplayName) == "string" then entry.DisplayName else pet.DisplayName,
+		RevealDisplayName = PetConfig.getPetRevealDisplayName(entry.PetId),
+		Rarity = if typeof(entry.Rarity) == "string" then entry.Rarity else pet.Rarity,
+		AuraRarity = if typeof(entry.AuraRarity) == "string" then entry.AuraRarity else pet.AuraRarity,
+		AuraRarityId = if typeof(entry.AuraRarityId) == "string" then entry.AuraRarityId else pet.AuraRarityId,
+		AuraRevealTier = entry.AuraRevealTier or pet.AuraRevealTier,
+		AdjustedChance = if not isLegacyFallback then chance else nil,
+		Chance = if isFinitePositiveNumber(chance) then chance else 0,
+		OddsText = oddsText,
+		Power = power,
+		Color = pet.Color,
+		AuraColor = pet.AuraColor,
+		AuraAccentColor = pet.AuraAccentColor,
+		IsLegacyFallback = isLegacyFallback,
+	}
+end
+
+local function getRollPreviewEntries(snapshot)
+	local roll = if typeof(snapshot) == "table" and typeof(snapshot.Roll) == "table" then snapshot.Roll else nil
+	local preview = if roll ~= nil and typeof(roll.Preview) == "table" then roll.Preview else nil
+	local sourceEntries = if preview ~= nil and typeof(preview.Entries) == "table" then preview.Entries else nil
+	local isLegacyFallback = sourceEntries == nil
 	local entries = {}
 
-	for _, petInfo in ipairs(preview) do
-		table.insert(entries, petInfo)
+	if sourceEntries == nil then
+		sourceEntries = PetConfig.getRollPreview()
+	end
+
+	for _, entry in ipairs(sourceEntries) do
+		local petInfo = getVisualPetInfo(entry, isLegacyFallback)
+
+		if petInfo ~= nil then
+			table.insert(entries, petInfo)
+		end
 	end
 
 	return entries
@@ -74,28 +137,25 @@ local function getPreviewPetInfo(sequence, index)
 	return sequence[wrappedIndex]
 end
 
-local function getPetInfoById(petId)
+local function getPetInfoById(petId, sequence)
+	for _, petInfo in ipairs(sequence or {}) do
+		if petInfo.PetId == petId then
+			return petInfo
+		end
+	end
+
 	local pet = PetConfig.getPet(petId)
 
 	if pet == nil then
 		return nil
 	end
 
-	return {
+	return getVisualPetInfo({
 		PetId = petId,
-		DisplayName = pet.DisplayName,
-		RevealDisplayName = PetConfig.getPetRevealDisplayName(petId),
-		Rarity = pet.Rarity,
-		AuraRarity = pet.AuraRarity,
-		AuraRarityId = pet.AuraRarityId,
-		AuraRevealTier = pet.AuraRevealTier,
-		OddsText = PetConfig.getChanceOddsText(pet.RollChance),
+		Chance = pet.RollChance,
+		OddsText = "Base " .. PetConfig.getChanceOddsText(pet.RollChance),
 		Power = PetConfig.getPetPower(petId),
-		Color = pet.Color,
-		AuraColor = pet.AuraColor,
-		AuraAccentColor = pet.AuraAccentColor,
-		Damage = pet.Damage,
-	}
+	}, true)
 end
 
 local function getRollRouletteSpacing()
@@ -220,7 +280,7 @@ local function getRollAnimationPetInfo(rollAnimation)
 		return nil
 	end
 
-	return getPetInfoById(rollAnimation.Pet.PetId)
+	return rollAnimation.ResultInfo or getPetInfoById(rollAnimation.Pet.PetId, rollAnimation.Sequence)
 end
 
 local function getRollPetNumberText(petInfo)
@@ -229,6 +289,16 @@ local function getRollPetNumberText(petInfo)
 	end
 
 	return petInfo.OddsText
+end
+
+local function getRollPetPowerText(petInfo)
+	if petInfo == nil or typeof(petInfo.Power) ~= "number" then
+		return ""
+	end
+
+	local prefix = if petInfo.IsLegacyFallback then "Base power " else "Power "
+
+	return prefix .. NumberFormatter.compact(petInfo.Power)
 end
 
 local function getRollRouletteCardEmphasis(xPosition)
@@ -498,6 +568,18 @@ local function createRollAnimationOverlay(rollAnimation)
 			ZIndex = zIndexBase + 6,
 		})
 		children.ResultName = createResultNameLabel(petInfo, zIndexBase + 6)
+		children.ResultPower = HudPrimitives.createLabel(getRollPetPowerText(petInfo), {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Font = UIThemeConfig.Font,
+			Position = ROLL_RESULT_POWER_POSITION,
+			Size = UDim2.fromOffset(360, 30),
+			TextColor3 = Color3.fromRGB(237, 235, 255),
+			TextSize = 20,
+			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+			TextStrokeTransparency = 0.35,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = zIndexBase + 6,
+		})
 	end
 
 	return React.createElement("Frame", {
@@ -560,7 +642,19 @@ function RollScreenOverlay.getRollOpeningDurationFromScale(durationScale)
 end
 
 function RollScreenOverlay.buildRollRouletteTrack(sequence, rolledPet)
-	local resultInfo = if rolledPet ~= nil then getPetInfoById(rolledPet.PetId) else nil
+	local resultInfo = if rolledPet ~= nil then getPetInfoById(rolledPet.PetId, sequence) else nil
+
+	if
+		typeof(rolledPet) == "table"
+		and (
+			isFinitePositiveNumber(rolledPet.AdjustedChance)
+			or typeof(rolledPet.OddsText) == "string"
+			or typeof(rolledPet.Power) == "number"
+		)
+	then
+		resultInfo = getVisualPetInfo(rolledPet, false) or resultInfo
+	end
+
 	local track = {}
 	local targetIndex = if resultInfo ~= nil
 		then rollVisualRandom:NextInteger(ROLL_ROULETTE_TARGET_INDEX_MIN, ROLL_ROULETTE_TARGET_INDEX_MAX)
@@ -582,6 +676,53 @@ function RollScreenOverlay.buildRollRouletteTrack(sequence, rolledPet)
 	return track, targetIndex
 end
 
+local function RollScreenActions(props)
+	local autoRollEnabled = props.AutoRollEnabled == true
+	local iconRotation, setIconRotation = React.useBinding(0)
+	local rotationRef = React.useRef(0)
+
+	React.useEffect(function()
+		rotationRef.current = 0
+		setIconRotation(0)
+
+		if not autoRollEnabled then
+			return
+		end
+
+		local connection = RunService.Heartbeat:Connect(function(deltaTime)
+			rotationRef.current = (rotationRef.current + deltaTime * AUTO_ROLL_ICON_ROTATION_DEGREES_PER_SECOND) % 360
+			setIconRotation(rotationRef.current)
+		end)
+
+		return function()
+			connection:Disconnect()
+		end
+	end, { autoRollEnabled })
+
+	return HudIconBar.create({
+		{
+			Name = "AutoRoll",
+			IconId = "AutoRoll",
+			LabelText = if autoRollEnabled then "Auto Roll: On" else "Auto Roll: Off",
+			Activated = props.OnToggleAutoRoll,
+			IconColor3 = if autoRollEnabled then Color3.fromRGB(65, 255, 155) else nil,
+			IconPivotYOffset = AUTO_ROLL_ICON_PIVOT_Y_OFFSET,
+			IconRotation = if autoRollEnabled then iconRotation else 0,
+		},
+		{
+			Name = "HideAutoRoll",
+			IconId = "RollViewHidden",
+			LabelText = "Hide Rolls",
+			Activated = props.OnHide,
+		},
+	}, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		IconGap = ROLL_SCREEN_ACTION_GAP,
+		Position = ROLL_SCREEN_ACTION_POSITION,
+		ZIndex = 60,
+	}, Enum.FillDirection.Horizontal, 1)
+end
+
 function RollScreenOverlay.create(props)
 	local resolvedProps = props or {}
 
@@ -597,28 +738,11 @@ function RollScreenOverlay.create(props)
 			Scale = resolvedProps.Scale or 1,
 		}),
 		RollAnimation = createRollAnimationOverlay(resolvedProps.RollAnimation),
-		RollScreenActions = HudIconBar.create({
-			{
-				Name = "AutoRoll",
-				IconId = "AutoRoll",
-				LabelText = "Auto Roll",
-				Activated = resolvedProps.OnToggleAutoRoll,
-				IconColor3 = if resolvedProps.AutoRollEnabled then Color3.fromRGB(65, 255, 155) else nil,
-				IconPivotYOffset = AUTO_ROLL_ICON_PIVOT_Y_OFFSET,
-				IconRotation = if resolvedProps.AutoRollEnabled then resolvedProps.AutoRollIconRotation or 0 else 0,
-			},
-			{
-				Name = "HideAutoRoll",
-				IconId = "RollViewHidden",
-				LabelText = "Hide Rolls",
-				Activated = resolvedProps.OnHide,
-			},
-		}, {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			IconGap = ROLL_SCREEN_ACTION_GAP,
-			Position = ROLL_SCREEN_ACTION_POSITION,
-			ZIndex = 60,
-		}, Enum.FillDirection.Horizontal, 1),
+		RollScreenActions = React.createElement(RollScreenActions, {
+			AutoRollEnabled = resolvedProps.AutoRollEnabled,
+			OnHide = resolvedProps.OnHide,
+			OnToggleAutoRoll = resolvedProps.OnToggleAutoRoll,
+		}),
 	})
 end
 

@@ -36,7 +36,7 @@ local LEFT_COLUMN_POSITION = UDim2.fromOffset(44, CONTENT_TOP_PADDING)
 local LEFT_COLUMN_SIZE = UDim2.fromOffset(384, 380)
 local RIGHT_COLUMN_POSITION = UDim2.fromOffset(456, CONTENT_TOP_PADDING)
 local RIGHT_COLUMN_SIZE = UDim2.fromOffset(420, 376)
-local VIEWPORT_SIZE = UDim2.fromOffset(384, 308)
+local VIEWPORT_SIZE = UDim2.fromOffset(384, 236)
 local STAT_CARD_SIZE = UDim2.fromOffset(186, 42)
 local STAT_CARD_PADDING = UDim2.fromOffset(10, 8)
 local UPGRADE_ROW_HEIGHT = 50
@@ -220,31 +220,23 @@ local function createStatCard(label, value, layoutOrder, accentColor)
 end
 
 local function getUpgradeEffectText(upgradeId, upgrade)
-	if upgradeId == "Capacity" then
-		return "+" .. NumberFormatter.compact(upgrade.Amount or 0) .. " capacity"
-	end
-
-	if upgradeId == "Luck" then
-		return "+" .. NumberFormatter.decimal(upgrade.Amount or 0, 1) .. " luck"
-	end
-
-	if upgradeId == "RollSpeed" then
-		return "+" .. NumberFormatter.compact(upgrade.Amount or 0) .. "% roll speed"
-	end
-
-	return upgrade.Description or ""
+	return upgrade.Description or upgradeId
 end
 
 local function UpgradeButton(props)
 	local upgradeId = props.UpgradeId
 	local upgrade = props.Upgrade
 	local level = props.Level or 0
-	local cost = props.Cost or 0
+	local maxLevel = props.MaxLevel or level
+	local cost = props.Cost
 	local canAfford = props.CanAfford == true
 	local canBuy = props.CanBuy == true
+	local isMaxed = props.IsMaxed == true
 	local onBuyUpgrade = props.OnBuyUpgrade
-	local gradient = if canAfford then UPGRADE_READY_GRADIENT else UPGRADE_LOCKED_GRADIENT
-	local costText = NumberFormatter.compact(cost) .. " Essence"
+	local gradient = if canBuy then UPGRADE_READY_GRADIENT else UPGRADE_LOCKED_GRADIENT
+	local costText = if isMaxed
+		then "MAX"
+		elseif typeof(cost) == "number" then NumberFormatter.compact(cost) .. " Essence" else "CAPPED"
 
 	return React.createElement("Frame", {
 		BackgroundTransparency = 1,
@@ -259,7 +251,7 @@ local function UpgradeButton(props)
 			HoverTweenInfo = UPGRADE_BUTTON_HOVER_TWEEN_INFO,
 			RestTweenInfo = UPGRADE_BUTTON_REST_TWEEN_INFO,
 			ButtonProps = {
-				Active = true,
+				Active = canBuy,
 				AnchorPoint = Vector2.new(0.5, 0.5),
 				AutoButtonColor = false,
 				BackgroundTransparency = 1,
@@ -306,7 +298,7 @@ local function UpgradeButton(props)
 					TextStrokeTransparency = 0.15,
 					ZIndex = 97,
 				}),
-				Level = createLabel("Lv " .. tostring(level), {
+				Level = createLabel("Lv " .. tostring(level) .. " / " .. tostring(maxLevel), {
 					AnchorPoint = Vector2.new(1, 0),
 					Position = UDim2.new(1, -14, 0, 3),
 					Size = UDim2.fromOffset(122, 23),
@@ -341,8 +333,9 @@ local function createUpgradeRow(snapshot, upgradeId, layoutOrder, onBuyUpgrade)
 	end
 
 	local level = (snapshot.StoneLevels and snapshot.StoneLevels[upgradeId]) or 0
-	local cost = (snapshot.NextUpgradeCosts and snapshot.NextUpgradeCosts[upgradeId]) or 0
-	local canAfford = (snapshot.Essence or 0) >= cost
+	local cost = if snapshot.NextUpgradeCosts ~= nil then snapshot.NextUpgradeCosts[upgradeId] else nil
+	local isMaxed = level >= upgrade.MaxLevel
+	local canAfford = not isMaxed and typeof(cost) == "number" and (snapshot.Essence or 0) >= cost
 	local canBuy = canAfford and onBuyUpgrade ~= nil
 
 	return React.createElement(UpgradeButton, {
@@ -351,9 +344,11 @@ local function createUpgradeRow(snapshot, upgradeId, layoutOrder, onBuyUpgrade)
 		Cost = cost,
 		LayoutOrder = layoutOrder,
 		Level = level,
+		MaxLevel = upgrade.MaxLevel,
 		OnBuyUpgrade = onBuyUpgrade,
 		Upgrade = upgrade,
 		UpgradeId = upgradeId,
+		IsMaxed = isMaxed,
 	})
 end
 
@@ -373,7 +368,7 @@ local function createEssenceDisplay(essenceText)
 		AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		Position = UDim2.new(0.5, 0, 0, 344),
+		Position = UDim2.new(0.5, 0, 0, 274),
 		Size = UDim2.fromOffset(0, 32),
 		ZIndex = 96,
 	}, {
@@ -406,7 +401,76 @@ local function createEssenceDisplay(essenceText)
 	})
 end
 
-local function createLeftColumn(snapshot)
+local function createAutomationPanel(snapshot, onSetAutoCapacity)
+	local automation = if typeof(snapshot.Automation) == "table" then snapshot.Automation else {}
+	local isUnlocked = automation.AutoCapacityUnlocked == true
+	local isEnabled = isUnlocked and automation.AutoCapacityEnabled == true
+	local isActionable = isUnlocked and onSetAutoCapacity ~= nil
+	local statusText = if not isUnlocked then "Locked" elseif isEnabled then "On" else "Off"
+	local statusColor = if not isUnlocked
+		then Color3.fromRGB(145, 145, 152)
+		elseif isEnabled then Color3.fromRGB(42, 199, 116) else Color3.fromRGB(218, 62, 62)
+	local warningText = if isUnlocked
+		then "Automatically spends Essence on Capacity and can delay saving for a zone unlock."
+		else "Unlocks free after your first Rebirth."
+
+	return React.createElement("Frame", {
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundTransparency = 0.04,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 310),
+		Size = UDim2.fromOffset(384, 86),
+		ZIndex = 96,
+	}, {
+		Corner = createCorner(8),
+		Stroke = createBorder(3),
+		Title = createLabel("Auto Capacity (Free)", {
+			Font = UIThemeConfig.Font,
+			Position = UDim2.fromOffset(12, 5),
+			Size = UDim2.fromOffset(180, 25),
+			TextSize = 20,
+			ZIndex = 97,
+		}),
+		Status = createLabel(statusText, {
+			Font = UIThemeConfig.Font,
+			Position = UDim2.fromOffset(190, 5),
+			Size = UDim2.fromOffset(58, 25),
+			TextColor3 = statusColor,
+			TextSize = 18,
+			ZIndex = 97,
+		}),
+		Toggle = React.createElement("TextButton", {
+			Active = isActionable,
+			AutoButtonColor = isActionable,
+			BackgroundColor3 = if isEnabled then Color3.fromRGB(42, 199, 116) else Color3.fromRGB(105, 101, 116),
+			BackgroundTransparency = if isActionable then 0 else 0.3,
+			BorderSizePixel = 0,
+			Font = UIThemeConfig.Font,
+			Position = UDim2.fromOffset(256, 5),
+			Size = UDim2.fromOffset(116, 44),
+			Text = if isEnabled then "Turn Off" elseif isUnlocked then "Turn On" else "Locked",
+			TextColor3 = Color3.fromRGB(255, 255, 255),
+			TextSize = 16,
+			ZIndex = 98,
+			[React.Event.Activated] = if isActionable then function()
+				onSetAutoCapacity(not isEnabled)
+			end else nil,
+		}, {
+			Corner = createCorner(7),
+			Stroke = createBorder(2),
+		}),
+		Warning = createLabel(warningText, {
+			Position = UDim2.fromOffset(12, 48),
+			Size = UDim2.new(1, -24, 0, 34),
+			TextColor3 = if isUnlocked then Color3.fromRGB(167, 92, 32) else Color3.fromRGB(105, 101, 116),
+			TextSize = 13,
+			TextWrapped = true,
+			ZIndex = 97,
+		}),
+	})
+end
+
+local function createLeftColumn(snapshot, onSetAutoCapacity)
 	local stats = snapshot.StoneStats or RitualStoneConfig.BaseStats
 	local capacity = stats.Capacity or RitualStoneConfig.BaseStats.Capacity
 	local essenceText = string.format(
@@ -427,13 +491,14 @@ local function createLeftColumn(snapshot)
 			ZIndex = 95,
 		}),
 		DisplayTitle = createLabel("Ritual Stone", {
-			Position = UDim2.fromOffset(0, 316),
+			Position = UDim2.fromOffset(0, 244),
 			Size = UDim2.new(1, 0, 0, 30),
 			TextSize = SECTION_TITLE_TEXT_SIZE,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			ZIndex = 96,
 		}),
 		Essence = createEssenceDisplay(essenceText),
+		Automation = createAutomationPanel(snapshot, onSetAutoCapacity),
 	})
 end
 
@@ -548,7 +613,7 @@ function RitualCoreOverlay.create(props)
 		ViewportSize = resolvedProps.ViewportSize,
 		ZIndex = resolvedProps.ZIndex,
 		Children = {
-			LeftColumn = createLeftColumn(snapshot),
+			LeftColumn = createLeftColumn(snapshot, resolvedProps.OnSetAutoCapacity),
 			RightColumn = createRightColumn(snapshot, resolvedProps.OnBuyUpgrade),
 		},
 	})

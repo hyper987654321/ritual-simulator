@@ -122,11 +122,54 @@ function TutorialOverlay.getCurrentStepId(snapshot)
 		return nil
 	end
 
-	if snapshot == nil or snapshot.Tutorial == nil or snapshot.Tutorial.IsComplete then
+	if snapshot == nil then
 		return nil
 	end
 
-	return snapshot.Tutorial.CurrentStepId
+	local onboarding = if typeof(snapshot.Onboarding) == "table" then snapshot.Onboarding else nil
+
+	if onboarding == nil then
+		local legacyTutorial = if typeof(snapshot.Tutorial) == "table" then snapshot.Tutorial else nil
+
+		if legacyTutorial == nil or legacyTutorial.IsComplete then
+			return nil
+		end
+
+		return legacyTutorial.CurrentStepId
+	end
+
+	if onboarding.GuidanceHidden == true then
+		return nil
+	end
+
+	if onboarding.IntroSeen ~= true then
+		return TutorialConfig.StepIds.Intro
+	end
+
+	local milestones = if typeof(onboarding.Milestones) == "table" then onboarding.Milestones else {}
+
+	if milestones.first_roll ~= true then
+		return TutorialConfig.StepIds.FirstRoll
+	end
+
+	-- The legacy overlay has no blocking card for these canonical traversal milestones.
+	if milestones.entered_crystal_zone ~= true then
+		return nil
+	end
+
+	if milestones.first_stone_upgrade ~= true then
+		return TutorialConfig.StepIds.FirstStoneUpgrade
+	end
+
+	if milestones.zone_2_unlocked ~= true or milestones.zone_3_unlocked ~= true then
+		return nil
+	end
+
+	if milestones.first_rebirth ~= true then
+		return TutorialConfig.StepIds.FirstRebirth
+	end
+
+	return nil
 end
 
 function TutorialOverlay.getStep(snapshot, tutorialStarted)
@@ -167,7 +210,8 @@ function TutorialOverlay.getStep(snapshot, tutorialStarted)
 	end
 
 	if currentStepId == TutorialConfig.StepIds.FirstStoneUpgrade then
-		local firstCost = snapshot.NextUpgradeCosts.Capacity or 0
+		local nextUpgradeCosts = if typeof(snapshot.NextUpgradeCosts) == "table" then snapshot.NextUpgradeCosts else {}
+		local firstCost = nextUpgradeCosts.Capacity or 0
 		local canAffordFirstUpgrade = snapshot.Essence >= firstCost
 
 		if not canAffordFirstUpgrade then
@@ -198,7 +242,9 @@ function TutorialOverlay.getStep(snapshot, tutorialStarted)
 		}
 	end
 
-	if currentStepId == TutorialConfig.StepIds.FirstRebirth and snapshot.RebirthRequirement.CanRebirth then
+	local rebirth = if typeof(snapshot.Rebirth) == "table" then snapshot.Rebirth else snapshot.RebirthRequirement
+
+	if currentStepId == TutorialConfig.StepIds.FirstRebirth and rebirth ~= nil and rebirth.CanRebirth == true then
 		return {
 			StepId = currentStepId,
 			Message = "Rebirth is ready",

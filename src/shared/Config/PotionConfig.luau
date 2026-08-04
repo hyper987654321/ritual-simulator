@@ -6,17 +6,25 @@ PotionConfig.MaxStoredCount = 9999
 
 PotionConfig.PotionIds = {
 	Essence2x15m = "essence_potion_2x_15m",
+	RollFlow1_5x15m = "roll_flow_potion_1_5x_15m",
+	PetPower1_5x15m = "pet_power_potion_1_5x_15m",
+	RuneFlow1_5x15m = "rune_flow_potion_1_5x_15m",
 	Luck2x15m = "luck_potion_2x_15m",
 }
 
 PotionConfig.PotionOrder = {
 	PotionConfig.PotionIds.Essence2x15m,
+	PotionConfig.PotionIds.RollFlow1_5x15m,
+	PotionConfig.PotionIds.PetPower1_5x15m,
+	PotionConfig.PotionIds.RuneFlow1_5x15m,
 	PotionConfig.PotionIds.Luck2x15m,
 }
 
 PotionConfig.ShopOrder = {
 	PotionConfig.PotionIds.Essence2x15m,
-	PotionConfig.PotionIds.Luck2x15m,
+	PotionConfig.PotionIds.RollFlow1_5x15m,
+	PotionConfig.PotionIds.PetPower1_5x15m,
+	PotionConfig.PotionIds.RuneFlow1_5x15m,
 }
 
 PotionConfig.Potions = {
@@ -26,11 +34,53 @@ PotionConfig.Potions = {
 		ShortDisplayName = "2x Essence",
 		Description = "Use to double crystal Essence rewards for 15 minutes.",
 		IconId = "Essence",
-		GemCost = 25,
+		GemCost = 35,
 		IsShopEnabled = true,
 		BoostGrant = {
 			BoostId = BoostConfig.BoostIds.EssenceMultiplier,
 			Multiplier = 2,
+			DurationSeconds = BoostConfig.DefaultDurationSeconds,
+		},
+	},
+	[PotionConfig.PotionIds.RollFlow1_5x15m] = {
+		PotionId = PotionConfig.PotionIds.RollFlow1_5x15m,
+		DisplayName = "Roll Flow Potion",
+		ShortDisplayName = "Roll Flow",
+		Description = "Use to speed up ritual openings by 50% for 15 minutes.",
+		IconId = "AutoRoll",
+		GemCost = 30,
+		IsShopEnabled = true,
+		BoostGrant = {
+			BoostId = BoostConfig.BoostIds.RollSpeedMultiplier,
+			Multiplier = 1.5,
+			DurationSeconds = BoostConfig.DefaultDurationSeconds,
+		},
+	},
+	[PotionConfig.PotionIds.PetPower1_5x15m] = {
+		PotionId = PotionConfig.PotionIds.PetPower1_5x15m,
+		DisplayName = "Pet Power Potion",
+		ShortDisplayName = "Pet Power",
+		Description = "Use to increase pet crystal damage by 50% for 15 minutes.",
+		IconId = "PetInventory",
+		GemCost = 40,
+		IsShopEnabled = true,
+		BoostGrant = {
+			BoostId = BoostConfig.BoostIds.PetPowerMultiplier,
+			Multiplier = 1.5,
+			DurationSeconds = BoostConfig.DefaultDurationSeconds,
+		},
+	},
+	[PotionConfig.PotionIds.RuneFlow1_5x15m] = {
+		PotionId = PotionConfig.PotionIds.RuneFlow1_5x15m,
+		DisplayName = "Rune Flow Potion",
+		ShortDisplayName = "Rune Flow",
+		Description = "Use to increase Rune Focus charge by 50% for 15 minutes.",
+		IconId = "RitualCore",
+		GemCost = 40,
+		IsShopEnabled = true,
+		BoostGrant = {
+			BoostId = BoostConfig.BoostIds.RuneChargeMultiplier,
+			Multiplier = 1.5,
 			DurationSeconds = BoostConfig.DefaultDurationSeconds,
 		},
 	},
@@ -40,8 +90,8 @@ PotionConfig.Potions = {
 		ShortDisplayName = "Lucky Ritual",
 		Description = "Use to double roll luck for 15 minutes.",
 		IconId = "RollDice",
-		GemCost = 35,
-		IsShopEnabled = true,
+		GemCost = 45,
+		IsShopEnabled = false,
 		BoostGrant = {
 			BoostId = BoostConfig.BoostIds.LuckMultiplier,
 			Multiplier = 2,
@@ -65,7 +115,7 @@ local function cloneValue(value)
 end
 
 local function getSafeCount(value)
-	if typeof(value) ~= "number" then
+	if typeof(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
 		return 0
 	end
 
@@ -73,7 +123,7 @@ local function getSafeCount(value)
 end
 
 local function getPositiveInteger(value)
-	if typeof(value) ~= "number" then
+	if typeof(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
 		return nil
 	end
 
@@ -123,7 +173,15 @@ function PotionConfig.normalizePotionGrant(potionGrant)
 		return nil
 	end
 
-	local count = getPositiveInteger(potionGrant.Count) or 1
+	local count = 1
+
+	if potionGrant.Count ~= nil then
+		count = getPositiveInteger(potionGrant.Count)
+
+		if count == nil then
+			return nil
+		end
+	end
 
 	return {
 		PotionId = potionId,
@@ -146,12 +204,13 @@ function PotionConfig.addPotionGrant(potions, potionGrant)
 	end
 
 	local nextCount = math.min(PotionConfig.MaxStoredCount, currentCount + normalizedGrant.Count)
+	local appliedCount = nextCount - currentCount
 
 	normalizedPotions[normalizedGrant.PotionId] = nextCount
 
 	return true, {
 		PotionId = normalizedGrant.PotionId,
-		Count = normalizedGrant.Count,
+		Count = appliedCount,
 		StoredCount = nextCount,
 	}, normalizedPotions
 end

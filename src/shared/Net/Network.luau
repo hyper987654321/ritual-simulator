@@ -9,6 +9,7 @@ local REMOTE_WAIT_TIMEOUT_SECONDS = 15
 
 Network.RemoteEvents = {
 	CrystalStateUpdated = "CrystalStateUpdated",
+	PlayerStateUpdated = "PlayerStateUpdated",
 	PublicVisualUpdated = "PublicVisualUpdated",
 	PublicVisualRemoved = "PublicVisualRemoved",
 }
@@ -26,6 +27,9 @@ Network.Actions = {
 	SelectZone = "SelectZone",
 	Rebirth = "Rebirth",
 	Ascend = "Ascend",
+	SelectRuneFocus = "SelectRuneFocus",
+	BuyAscensionUpgrade = "BuyAscensionUpgrade",
+	SetAutoCapacity = "SetAutoCapacity",
 	BuyRune = "BuyRune",
 	CompleteTutorialStep = "CompleteTutorialStep",
 	ClaimRitualRushReward = "ClaimRitualRushReward",

@@ -1,13 +1,20 @@
+local ProfileContract = require(script.Parent:WaitForChild("ProfileContract"))
+
 local RitualStoneConfig = {}
 
 RitualStoneConfig.BaseStats = {
-	Capacity = 100,
+	Capacity = 120,
 	Luck = 1,
 	RollSpeedPercent = 100,
 }
 
-RitualStoneConfig.MinimumRollSpeedPercent = 25
+RitualStoneConfig.MinimumRollSpeedPercent = 100
 RitualStoneConfig.MaximumRollSpeedPercent = 400
+
+RitualStoneConfig.AutoCapacity = {
+	RequiredRebirths = 1,
+	MaxPurchasesPerInvocation = 8,
+}
 
 RitualStoneConfig.RollOpening = {
 	FlashSteps = 16,
@@ -19,10 +26,13 @@ RitualStoneConfig.RollOpening = {
 }
 
 RitualStoneConfig.Rebirth = {
-	BaseEssenceRequirement = 180,
-	EssenceGrowth = 1.65,
+	BaseEssenceRequirement = 1_700,
+	EssenceGrowth = 1.72,
 	MultiplierPerRebirth = 0.25,
 	LuckPerRebirth = 0.05,
+	PetPowerMultiplierPerRebirth = 0.03,
+	RuneChargeMultiplierPerRebirth = 0.025,
+	MaximumRuneChargeMultiplierBonus = 0.40,
 }
 
 RitualStoneConfig.Upgrades = {
@@ -30,30 +40,97 @@ RitualStoneConfig.Upgrades = {
 		DisplayName = "Capacity",
 		Description = "Store more Ritual Essence.",
 		BaseCost = 12,
-		CostGrowth = 1.35,
-		Amount = 75,
+		CostGrowth = 1.18,
+		MaxLevel = 100,
 	},
 	Luck = {
 		DisplayName = "Luck",
 		Description = "Improve rare pet roll weights.",
-		BaseCost = 18,
-		CostGrowth = 1.42,
-		Amount = 0.1,
+		BaseCost = 25,
+		CostGrowth = 1.35,
+		MaxLevel = 60,
 	},
 	RollSpeed = {
 		DisplayName = "Roll Speed",
 		Description = "Speed up pet roll openings.",
-		BaseCost = 22,
-		CostGrowth = 1.45,
-		Amount = 5,
+		BaseCost = 20,
+		CostGrowth = 1.32,
+		MaxLevel = 43,
 	},
 }
 
-RitualStoneConfig.UpgradeOrder = {
-	"Capacity",
-	"Luck",
-	"RollSpeed",
-}
+RitualStoneConfig.UpgradeOrder = table.clone(ProfileContract.StoneUpgradeOrder)
+
+local function getFiniteNumber(value, fallback)
+	if typeof(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
+		return fallback
+	end
+
+	return value
+end
+
+local function getSafeInteger(value, maximum)
+	local finiteValue = getFiniteNumber(value, 0)
+
+	return math.clamp(math.floor(finiteValue), 0, maximum)
+end
+
+local function getFiniteNonNegativeNumber(value, fallback)
+	return math.clamp(getFiniteNumber(value, fallback), 0, ProfileContract.MaximumExactInteger)
+end
+
+local function boundedAdd(...)
+	local total = 0
+
+	for index = 1, select("#", ...) do
+		total = math.min(
+			ProfileContract.MaximumExactInteger,
+			total + getFiniteNonNegativeNumber(select(index, ...), 0)
+		)
+	end
+
+	return total
+end
+
+local function boundedMultiply(left, right)
+	local safeLeft = getFiniteNonNegativeNumber(left, 0)
+	local safeRight = getFiniteNonNegativeNumber(right, 0)
+
+	if safeLeft == 0 or safeRight == 0 then
+		return 0
+	end
+
+	if safeLeft >= ProfileContract.MaximumExactInteger / safeRight then
+		return ProfileContract.MaximumExactInteger
+	end
+
+	return math.min(ProfileContract.MaximumExactInteger, safeLeft * safeRight)
+end
+
+local function boundedExponential(base, growth, exponent)
+	if base <= 0 or growth <= 0 then
+		return 0
+	end
+
+	local maximumExponent = math.log(ProfileContract.MaximumExactInteger / base) / math.log(growth)
+
+	if exponent >= maximumExponent then
+		return ProfileContract.MaximumExactInteger
+	end
+
+	return math.min(ProfileContract.MaximumExactInteger, base * (growth ^ exponent))
+end
+
+local function nice(value)
+	local safeValue = math.clamp(math.floor(getFiniteNumber(value, 1)), 1, ProfileContract.MaximumExactInteger)
+	local digitCount = math.floor(math.log(safeValue) / math.log(10)) + 1
+	local roundingUnit = 10 ^ math.max(0, digitCount - 2)
+
+	return math.min(
+		ProfileContract.MaximumExactInteger,
+		math.max(1, math.floor(safeValue / roundingUnit + 0.5) * roundingUnit)
+	)
+end
 
 function RitualStoneConfig.getUpgradeCost(upgradeId, currentLevel)
 	local upgrade = RitualStoneConfig.Upgrades[upgradeId]
@@ -62,40 +139,81 @@ function RitualStoneConfig.getUpgradeCost(upgradeId, currentLevel)
 		return nil
 	end
 
-	local level = math.max(0, currentLevel or 0)
+	local level = getSafeInteger(currentLevel, upgrade.MaxLevel)
 
-	return math.floor(upgrade.BaseCost * (upgrade.CostGrowth ^ level))
+	if level >= upgrade.MaxLevel then
+		return nil
+	end
+
+	return math.floor(boundedExponential(upgrade.BaseCost, upgrade.CostGrowth, level))
 end
 
 function RitualStoneConfig.getStats(levels, rebirths, runeBonuses, ascensionBonuses)
-	local safeLevels = levels or {}
-	local safeRebirths = rebirths or 0
-	local safeRuneBonuses = runeBonuses or {}
-	local safeAscensionBonuses = ascensionBonuses or {}
-	local capacityLevel = safeLevels.Capacity or 0
-	local luckLevel = safeLevels.Luck or 0
-	local rollSpeedLevel = safeLevels.RollSpeed or 0
-	local rebirthMultiplier = 1 + safeRebirths * RitualStoneConfig.Rebirth.MultiplierPerRebirth
-	local ascensionEssenceMultiplier = safeAscensionBonuses.CrystalEssenceMultiplier or 1
+	local safeLevels = if typeof(levels) == "table" then levels else {}
+	local safeRuneBonuses = if typeof(runeBonuses) == "table" then runeBonuses else {}
+	local safeAscensionBonuses = if typeof(ascensionBonuses) == "table" then ascensionBonuses else {}
+	local capacityLevel = getSafeInteger(safeLevels.Capacity, RitualStoneConfig.Upgrades.Capacity.MaxLevel)
+	local luckLevel = getSafeInteger(safeLevels.Luck, RitualStoneConfig.Upgrades.Luck.MaxLevel)
+	local rollSpeedLevel = getSafeInteger(safeLevels.RollSpeed, RitualStoneConfig.Upgrades.RollSpeed.MaxLevel)
+	local safeRebirths = getSafeInteger(rebirths, ProfileContract.MaximumExactInteger)
+	local rebirthMultiplier = boundedAdd(
+		1,
+		boundedMultiply(safeRebirths, RitualStoneConfig.Rebirth.MultiplierPerRebirth)
+	)
+	local ascensionEssenceMultiplier = getFiniteNonNegativeNumber(
+		safeAscensionBonuses.CrystalEssenceMultiplier,
+		1
+	)
+	local capacity = math.floor(boundedAdd(
+		boundedExponential(RitualStoneConfig.BaseStats.Capacity, 1.16, capacityLevel),
+		boundedMultiply(220, capacityLevel),
+		getFiniteNonNegativeNumber(safeRuneBonuses.Capacity, 0),
+		getFiniteNonNegativeNumber(safeAscensionBonuses.StartingCapacityBonus, 0)
+	))
+	local rebirthPetPowerMultiplier = boundedAdd(
+		1,
+		boundedMultiply(safeRebirths, RitualStoneConfig.Rebirth.PetPowerMultiplierPerRebirth)
+	)
+	local rebirthRuneChargeMultiplier = boundedAdd(
+		1,
+		math.min(
+			RitualStoneConfig.Rebirth.MaximumRuneChargeMultiplierBonus,
+			boundedMultiply(safeRebirths, RitualStoneConfig.Rebirth.RuneChargeMultiplierPerRebirth)
+		)
+	)
+	local ascensionPetPowerMultiplier = getFiniteNonNegativeNumber(
+		safeAscensionBonuses.PetPowerMultiplier,
+		1
+	)
+	local ascensionRuneChargeMultiplier = getFiniteNonNegativeNumber(
+		safeAscensionBonuses.RuneChargeMultiplier,
+		1
+	)
 
 	local stats = {
-		Capacity = RitualStoneConfig.BaseStats.Capacity
-			+ capacityLevel * RitualStoneConfig.Upgrades.Capacity.Amount
-			+ (safeRuneBonuses.Capacity or 0),
-		Luck = RitualStoneConfig.BaseStats.Luck
-			+ luckLevel * RitualStoneConfig.Upgrades.Luck.Amount
-			+ safeRebirths * RitualStoneConfig.Rebirth.LuckPerRebirth
-			+ (safeRuneBonuses.Luck or 0),
-		RollSpeedPercent = RitualStoneConfig.BaseStats.RollSpeedPercent
-			+ rollSpeedLevel * RitualStoneConfig.Upgrades.RollSpeed.Amount
-			+ (safeRuneBonuses.RollSpeedPercent or 0),
+		Capacity = math.clamp(capacity, 1, ProfileContract.MaximumExactInteger),
+		Luck = boundedAdd(
+			RitualStoneConfig.BaseStats.Luck,
+			boundedMultiply(0.12, luckLevel),
+			boundedMultiply(safeRebirths, RitualStoneConfig.Rebirth.LuckPerRebirth),
+			getFiniteNonNegativeNumber(safeRuneBonuses.Luck, 0),
+			getFiniteNonNegativeNumber(safeAscensionBonuses.Luck, 0)
+		),
+		RollSpeedPercent = boundedAdd(
+			RitualStoneConfig.BaseStats.RollSpeedPercent,
+			boundedMultiply(7, rollSpeedLevel),
+			getFiniteNonNegativeNumber(safeRuneBonuses.RollSpeedPercent, 0),
+			getFiniteNonNegativeNumber(safeAscensionBonuses.RollSpeedPercent, 0)
+		),
 		RebirthMultiplier = rebirthMultiplier,
+		RebirthPetPowerMultiplier = rebirthPetPowerMultiplier,
+		RebirthRuneChargeMultiplier = rebirthRuneChargeMultiplier,
 		AscensionEssenceMultiplier = ascensionEssenceMultiplier,
-		EssenceMultiplier = rebirthMultiplier * ascensionEssenceMultiplier,
-		RitualPowerBonus = safeAscensionBonuses.RitualPower or 0,
+		AscensionPetPowerMultiplier = ascensionPetPowerMultiplier,
+		AscensionRuneChargeMultiplier = ascensionRuneChargeMultiplier,
+		EssenceMultiplier = boundedMultiply(rebirthMultiplier, ascensionEssenceMultiplier),
+		RitualPowerBonus = getFiniteNonNegativeNumber(safeAscensionBonuses.RitualPower, 0),
 	}
-
-	stats.Luck += safeAscensionBonuses.Luck or 0
 
 	stats.RollSpeedPercent = math.clamp(
 		stats.RollSpeedPercent,
@@ -107,7 +225,7 @@ function RitualStoneConfig.getStats(levels, rebirths, runeBonuses, ascensionBonu
 end
 
 function RitualStoneConfig.getRollOpeningDurationScale(rollSpeedPercent)
-	local speedPercent = rollSpeedPercent or RitualStoneConfig.BaseStats.RollSpeedPercent
+	local speedPercent = getFiniteNumber(rollSpeedPercent, RitualStoneConfig.BaseStats.RollSpeedPercent)
 
 	if speedPercent <= 0 then
 		return 1
@@ -145,21 +263,27 @@ function RitualStoneConfig.getRollOpeningSpeedPercent(rollSpeedPercent)
 end
 
 function RitualStoneConfig.getTotalUpgradeLevels(levels)
+	local source = if typeof(levels) == "table" then levels else {}
 	local total = 0
 
 	for _, upgradeId in ipairs(RitualStoneConfig.UpgradeOrder) do
-		total += (levels and levels[upgradeId]) or 0
+		local upgrade = RitualStoneConfig.Upgrades[upgradeId]
+		total += getSafeInteger(source[upgradeId], upgrade.MaxLevel)
 	end
 
 	return total
 end
 
 function RitualStoneConfig.getRebirthRequirement(rebirths)
-	local safeRebirths = rebirths or 0
+	local safeRebirths = getSafeInteger(rebirths, ProfileContract.MaximumExactInteger)
 
 	return {
-		RequiredEssence = math.floor(RitualStoneConfig.Rebirth.BaseEssenceRequirement
-			* (RitualStoneConfig.Rebirth.EssenceGrowth ^ safeRebirths)),
+		RequiredEssence = nice(boundedExponential(
+			RitualStoneConfig.Rebirth.BaseEssenceRequirement,
+			RitualStoneConfig.Rebirth.EssenceGrowth,
+			safeRebirths
+		)),
+		RequiredZone = math.min(5, 3 + math.floor(safeRebirths / 2)),
 	}
 end
 

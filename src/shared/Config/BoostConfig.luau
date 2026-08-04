@@ -1,15 +1,24 @@
+local ProfileContract = require(script.Parent:WaitForChild("ProfileContract"))
+
 local BoostConfig = {}
 
 BoostConfig.BoostIds = {
 	EssenceMultiplier = "EssenceMultiplier",
 	LuckMultiplier = "LuckMultiplier",
+	RollSpeedMultiplier = "RollSpeedMultiplier",
+	PetPowerMultiplier = "PetPowerMultiplier",
+	RuneChargeMultiplier = "RuneChargeMultiplier",
 }
 
 BoostConfig.DefaultDurationSeconds = 15 * 60
+BoostConfig.MaximumActiveDurationSeconds = ProfileContract.MaximumActiveBoostSeconds
 
 BoostConfig.BoostOrder = {
 	BoostConfig.BoostIds.EssenceMultiplier,
 	BoostConfig.BoostIds.LuckMultiplier,
+	BoostConfig.BoostIds.RollSpeedMultiplier,
+	BoostConfig.BoostIds.PetPowerMultiplier,
+	BoostConfig.BoostIds.RuneChargeMultiplier,
 }
 
 BoostConfig.Boosts = {
@@ -31,6 +40,33 @@ BoostConfig.Boosts = {
 		Multiplier = 2,
 		DurationSeconds = BoostConfig.DefaultDurationSeconds,
 	},
+	[BoostConfig.BoostIds.RollSpeedMultiplier] = {
+		BoostId = BoostConfig.BoostIds.RollSpeedMultiplier,
+		DisplayName = "1.5x Roll Flow",
+		ShortDisplayName = "Roll Flow",
+		Description = "Speeds up ritual openings by 50%.",
+		IconId = "AutoRoll",
+		Multiplier = 1.5,
+		DurationSeconds = BoostConfig.DefaultDurationSeconds,
+	},
+	[BoostConfig.BoostIds.PetPowerMultiplier] = {
+		BoostId = BoostConfig.BoostIds.PetPowerMultiplier,
+		DisplayName = "1.5x Pet Power",
+		ShortDisplayName = "Pet Power",
+		Description = "Increases pet crystal damage by 50%.",
+		IconId = "PetInventory",
+		Multiplier = 1.5,
+		DurationSeconds = BoostConfig.DefaultDurationSeconds,
+	},
+	[BoostConfig.BoostIds.RuneChargeMultiplier] = {
+		BoostId = BoostConfig.BoostIds.RuneChargeMultiplier,
+		DisplayName = "1.5x Rune Flow",
+		ShortDisplayName = "Rune Flow",
+		Description = "Increases Rune Focus charge by 50%.",
+		IconId = "RitualCore",
+		Multiplier = 1.5,
+		DurationSeconds = BoostConfig.DefaultDurationSeconds,
+	},
 }
 
 local function cloneValue(value)
@@ -48,43 +84,25 @@ local function cloneValue(value)
 end
 
 local function getCurrentUnixTime(nowUnix)
-	if typeof(nowUnix) == "number" then
-		return math.max(0, math.floor(nowUnix))
+	if typeof(nowUnix) == "number" and nowUnix == nowUnix and math.abs(nowUnix) ~= math.huge then
+		return math.clamp(math.floor(nowUnix), 0, ProfileContract.MaximumExactInteger)
 	end
 
 	return DateTime.now().UnixTimestamp
 end
 
 local function getPositiveInteger(value)
-	if typeof(value) ~= "number" then
+	if typeof(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
 		return nil
 	end
 
 	local integer = math.floor(value)
 
-	if integer <= 0 or integer ~= value then
+	if integer <= 0 or integer ~= value or integer > ProfileContract.MaximumExactInteger then
 		return nil
 	end
 
 	return integer
-end
-
-local function getPositiveMultiplier(value)
-	if typeof(value) ~= "number" or value <= 1 then
-		return nil
-	end
-
-	return value
-end
-
-local function getSafeMultiplier(value, fallback)
-	local multiplier = getPositiveMultiplier(value)
-
-	if multiplier ~= nil then
-		return multiplier
-	end
-
-	return fallback
 end
 
 function BoostConfig.getBoost(boostId)
@@ -112,17 +130,24 @@ function BoostConfig.normalizeBoostGrant(boostGrant)
 		return nil
 	end
 
-	local multiplier = getSafeMultiplier(boostGrant.Multiplier, boostDefinition.Multiplier)
-	local durationSeconds = getPositiveInteger(boostGrant.DurationSeconds) or boostDefinition.DurationSeconds
+	if boostGrant.Multiplier ~= nil and boostGrant.Multiplier ~= boostDefinition.Multiplier then
+		return nil
+	end
 
-	if multiplier == nil or durationSeconds == nil then
+	local durationSeconds = boostDefinition.DurationSeconds
+
+	if boostGrant.DurationSeconds ~= nil then
+		durationSeconds = getPositiveInteger(boostGrant.DurationSeconds)
+	end
+
+	if durationSeconds == nil then
 		return nil
 	end
 
 	return {
 		BoostId = boostId,
-		Multiplier = multiplier,
-		DurationSeconds = durationSeconds,
+		Multiplier = boostDefinition.Multiplier,
+		DurationSeconds = math.min(durationSeconds, BoostConfig.MaximumActiveDurationSeconds),
 	}
 end
 
@@ -142,15 +167,11 @@ function BoostConfig.normalizeActiveBoosts(activeBoosts, nowUnix)
 			local endsAtUnix = getPositiveInteger(activeBoost.EndsAtUnix)
 
 			if endsAtUnix ~= nil and endsAtUnix > currentUnixTime then
-				local multiplier = getSafeMultiplier(activeBoost.Multiplier, boostDefinition.Multiplier)
-
-				if multiplier ~= nil then
-					normalized[boostId] = {
-						BoostId = boostId,
-						Multiplier = multiplier,
-						EndsAtUnix = endsAtUnix,
-					}
-				end
+				normalized[boostId] = {
+					BoostId = boostId,
+					Multiplier = boostDefinition.Multiplier,
+					EndsAtUnix = math.min(endsAtUnix, currentUnixTime + BoostConfig.MaximumActiveDurationSeconds),
+				}
 			end
 		end
 	end
@@ -177,7 +198,10 @@ function BoostConfig.applyBoostGrant(activeBoosts, boostGrant, nowUnix)
 	local activeBoost = {
 		BoostId = normalizedGrant.BoostId,
 		Multiplier = normalizedGrant.Multiplier,
-		EndsAtUnix = startsAtUnix + normalizedGrant.DurationSeconds,
+		EndsAtUnix = math.min(
+			startsAtUnix + normalizedGrant.DurationSeconds,
+			currentUnixTime + BoostConfig.MaximumActiveDurationSeconds
+		),
 	}
 
 	normalizedActiveBoosts[normalizedGrant.BoostId] = activeBoost
@@ -210,7 +234,7 @@ function BoostConfig.getActiveBoostMultiplier(activeBoosts, boostId, nowUnix)
 		return 1
 	end
 
-	return getSafeMultiplier(activeBoost.Multiplier, boostDefinition.Multiplier) or 1
+	return boostDefinition.Multiplier
 end
 
 function BoostConfig.getDurationLabel(durationSeconds)

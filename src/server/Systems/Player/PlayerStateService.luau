@@ -8,30 +8,36 @@ local MapGen = Shared:WaitForChild("MapGen")
 local AscensionConfig = require(Config:WaitForChild("AscensionConfig"))
 local BoostConfig = require(Config:WaitForChild("BoostConfig"))
 local PetConfig = require(Config:WaitForChild("PetConfig"))
+local PresentationEventConfig = require(Config:WaitForChild("PresentationEventConfig"))
 local PotionConfig = require(Config:WaitForChild("PotionConfig"))
+local ProfileContract = require(Config:WaitForChild("ProfileContract"))
 local RitualRushConfig = require(Config:WaitForChild("RitualRushConfig"))
 local ShopProductConfig = require(Config:WaitForChild("ShopProductConfig"))
 local RitualStoneConfig = require(Config:WaitForChild("RitualStoneConfig"))
-local RuneConfig = require(Config:WaitForChild("RuneConfig"))
-local TutorialConfig = require(Config:WaitForChild("TutorialConfig"))
+local RuneFocusConfig = require(Config:WaitForChild("RuneFocusConfig"))
 local ZoneConfig = require(Config:WaitForChild("ZoneConfig"))
 local GeneratedMapRuntime = require(MapGen:WaitForChild("GeneratedMapRuntime"))
 local LeaderstatsService = require(script.Parent:WaitForChild("LeaderstatsService"))
 local ProfilePersistence = require(script.Parent:WaitForChild("ProfilePersistence"))
 local PlayerPublicVisualSignal = require(script.Parent:WaitForChild("PlayerPublicVisualSignal"))
 local PlayerDerivedState = require(script.Parent:WaitForChild("PlayerDerivedState"))
+local PlayerFeedbackQueue = require(script.Parent:WaitForChild("PlayerFeedbackQueue"))
 local CrystalCombat = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("CrystalCombat"))
+local RuneFocusProgress = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("RuneFocusProgress"))
 local RitualRushProgress = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("RitualRushProgress"))
+local RitualStoneProgress = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("RitualStoneProgress"))
 
 local PlayerStateService = {}
 
-local PROFILE_LOAD_TIMEOUT_SECONDS = 10
-local AUTOSAVE_SECONDS = 60
+local PROFILE_LOAD_TIMEOUT_SECONDS = ProfileContract.Session.LoadTimeoutSeconds
+local PROFILE_SYNC_SECONDS = 60
 
-local profilesByPlayer = {}
+local profileRecordsByPlayer = {}
+local profileLoadTokensByPlayer = {}
 local profileOperationQueuesByPlayer = {}
 local random = Random.new()
 local hasStarted = false
+local nextProfileLoadToken = 0
 
 local function cloneArray(array)
 	local clone = {}
@@ -51,12 +57,22 @@ local function createDefaultStoneLevels()
 	}
 end
 
-local function createDefaultRuneLevels()
-	return {
-		capacity = 0,
-		luck = 0,
-		ritual_speed = 0,
-		pet_power = 0,
+local function resetRuneFocusForAscension(profile)
+	local runeFocus = if typeof(profile.RuneFocus) == "table" then profile.RuneFocus else {}
+	local activeId = if RuneFocusConfig.getFocus(runeFocus.ActiveId) ~= nil then runeFocus.ActiveId else nil
+	local levels = {}
+	local charge = {}
+
+	for _, focusId in ipairs(RuneFocusConfig.FocusOrder) do
+		levels[focusId] = 0
+		charge[focusId] = 0
+	end
+
+	profile.RuneFocus = {
+		Version = 1,
+		ActiveId = activeId,
+		Levels = levels,
+		Charge = charge,
 	}
 end
 
@@ -65,11 +81,18 @@ local function getNonNegativeInteger(value)
 		return 0
 	end
 
-	return math.max(0, math.floor(value))
+	return math.clamp(math.floor(value), 0, ProfileContract.MaximumExactInteger)
+end
+
+local function addExactIntegers(left, right)
+	local safeLeft = getNonNegativeInteger(left)
+	local safeRight = getNonNegativeInteger(right)
+
+	return safeLeft + math.min(safeRight, ProfileContract.MaximumExactInteger - safeLeft)
 end
 
 local function getPetCount(profile, petId)
-	return math.max(0, math.floor(profile.Pets[petId] or 0))
+	return getNonNegativeInteger(profile.Pets[petId])
 end
 
 local function reconcilePetIds(profile)
@@ -95,7 +118,7 @@ local function reconcilePetIds(profile)
 			local canonicalPetId = if typeof(petId) == "string" then PetConfig.getCanonicalPetId(petId) else nil
 			local resolvedPetId = canonicalPetId or petId
 
-			reconciledPets[resolvedPetId] = (reconciledPets[resolvedPetId] or 0) + safeCount
+			reconciledPets[resolvedPetId] = addExactIntegers(reconciledPets[resolvedPetId], safeCount)
 
 			if resolvedPetId ~= petId or safeCount ~= count then
 				didChange = true
@@ -282,67 +305,41 @@ end
 local function updateProgressRecords(profile, stats, ritualPower)
 	local rarestPetId, rarestPetScore = getRarestPet(profile)
 
-	profile.BestRitualPower = math.max(profile.BestRitualPower or 0, ritualPower)
-	profile.HighestCapacity = math.max(profile.HighestCapacity or 0, stats.Capacity)
+	profile.BestRitualPower = math.max(getNonNegativeInteger(profile.BestRitualPower), getNonNegativeInteger(ritualPower))
+	profile.HighestCapacity = math.max(getNonNegativeInteger(profile.HighestCapacity), getNonNegativeInteger(stats.Capacity))
 
-	if rarestPetScore > (profile.RarestPetScore or 0) then
+	if rarestPetScore > getNonNegativeInteger(profile.RarestPetScore) then
 		profile.RarestPetId = rarestPetId
 		profile.RarestPetScore = rarestPetScore
 	end
 end
 
-local function ensureTutorialCompletedSteps(profile)
-	if profile.TutorialCompletedSteps == nil then
-		profile.TutorialCompletedSteps = {}
-	end
-
-	return profile.TutorialCompletedSteps
-end
-
-local function completeTutorialStep(profile, stepId)
-	if not TutorialConfig.isStepId(stepId) then
+local function completeOnboardingMilestone(profile, milestoneId)
+	if table.find(ProfileContract.OnboardingMilestoneOrder, milestoneId) == nil then
 		return false
 	end
 
-	local completedSteps = ensureTutorialCompletedSteps(profile)
+	local onboarding = if typeof(profile.Onboarding) == "table" then profile.Onboarding else {}
+	local milestones = if typeof(onboarding.Milestones) == "table" then onboarding.Milestones else {}
 
-	if completedSteps[stepId] == true then
+	onboarding.Version = 1
+	onboarding.IntroSeen = onboarding.IntroSeen == true
+	onboarding.GuidanceHidden = onboarding.GuidanceHidden == true
+	onboarding.Milestones = milestones
+	onboarding.Rewarded = if typeof(onboarding.Rewarded) == "table" then onboarding.Rewarded else {}
+	profile.Onboarding = onboarding
+
+	if milestones[milestoneId] == true then
 		return false
 	end
 
-	completedSteps[stepId] = true
+	milestones[milestoneId] = true
 
 	return true
 end
 
-local function completeTutorialThroughStep(profile, stepId)
-	local stepIndex = TutorialConfig.getStepIndex(stepId)
-
-	if stepIndex == nil then
-		return false
-	end
-
-	local didComplete = false
-
-	for index, orderedStepId in ipairs(TutorialConfig.StepOrder) do
-		if index > stepIndex then
-			break
-		end
-
-		didComplete = completeTutorialStep(profile, orderedStepId) or didComplete
-	end
-
-	return didComplete
-end
-
-local function backfillTutorialProgress(profile)
-	if profile.Rebirths > 0 then
-		completeTutorialThroughStep(profile, TutorialConfig.StepIds.FirstRebirth)
-	elseif RitualStoneConfig.getTotalUpgradeLevels(profile.StoneLevels) > 0 then
-		completeTutorialThroughStep(profile, TutorialConfig.StepIds.FirstStoneUpgrade)
-	elseif profile.Rolls > 0 then
-		completeTutorialThroughStep(profile, TutorialConfig.StepIds.FirstRoll)
-	end
+local function hasPendingAwayClaim(profile)
+	return typeof(profile.AwayRewards) == "table" and typeof(profile.AwayRewards.Pending) == "table"
 end
 
 local function getZoneUnlockFailureMessage(profile, zoneId, zone)
@@ -363,7 +360,7 @@ local function getZoneUnlockFailureMessage(profile, zoneId, zone)
 end
 
 local function addPet(profile, petId)
-	local count = getPetCount(profile, petId) + 1
+	local count = addExactIntegers(getPetCount(profile, petId), 1)
 
 	profile.Pets[petId] = count
 
@@ -379,17 +376,59 @@ local function addPet(profile, petId)
 	}
 end
 
+local function queueProgressionReadiness(profile)
+	local rebirthRequirement = RitualStoneConfig.getRebirthRequirement(profile.Rebirths)
+	local canRebirth = PlayerDerivedState.canRebirth(profile, rebirthRequirement)
+
+	PlayerFeedbackQueue.updateReadiness(
+		profile,
+		"rebirth",
+		canRebirth,
+		PresentationEventConfig.EventIds.RebirthReady,
+		{
+			Rebirths = getNonNegativeInteger(profile.Rebirths),
+			RequiredEssence = rebirthRequirement.RequiredEssence,
+			RequiredZone = rebirthRequirement.RequiredZone,
+		}
+	)
+
+	local ascension = PlayerDerivedState.getAscensionSnapshot(profile)
+
+	PlayerFeedbackQueue.updateReadiness(
+		profile,
+		"ascension",
+		ascension.CanAscend == true,
+		PresentationEventConfig.EventIds.AscensionReady,
+		{
+			Ascensions = getNonNegativeInteger(profile.Ascensions),
+			RequiredRebirths = ascension.RequiredRebirths,
+			RequiredZone = ascension.RequiredZone,
+			StarReward = ascension.StarReward,
+		}
+	)
+end
+
 local function commitProgressRecords(profile)
 	local _, stats, equippedPetPower = PlayerDerivedState.getCurrentRitualRuntime(profile)
 	local ritualPower = PlayerDerivedState.calculateRitualPower(stats, equippedPetPower, profile.Rebirths)
 
 	updateProgressRecords(profile, stats, ritualPower)
+	queueProgressionReadiness(profile)
 
 	return stats, equippedPetPower, ritualPower
 end
 
 local function commitProfileForPersistence(profile)
 	local didReconcilePets = reconcilePetIds(profile)
+	profile.ActiveBoosts = BoostConfig.normalizeActiveBoosts(profile.ActiveBoosts)
+	profile.Potions = PotionConfig.normalizeInventory(profile.Potions)
+	profile.Essence = getNonNegativeInteger(profile.Essence)
+	profile.RitualGems = getNonNegativeInteger(profile.RitualGems)
+	profile.Rolls = getNonNegativeInteger(profile.Rolls)
+	profile.Rebirths = getNonNegativeInteger(profile.Rebirths)
+	profile.Ascensions = math.min(#AscensionConfig.Milestones, getNonNegativeInteger(profile.Ascensions))
+	profile.AscensionStars = getNonNegativeInteger(profile.AscensionStars)
+	profile.AscensionUpgrades = if typeof(profile.AscensionUpgrades) == "table" then profile.AscensionUpgrades else {}
 	local _, stats, equippedPetPower = PlayerDerivedState.getCurrentRitualRuntime(profile)
 	local ritualPower = PlayerDerivedState.calculateRitualPower(stats, equippedPetPower, profile.Rebirths)
 
@@ -398,24 +437,103 @@ local function commitProfileForPersistence(profile)
 		CrystalCombat.clearAttackRuntime(profile)
 	end
 	RitualRushProgress.ensureProgress(profile)
-	profile.ActiveBoosts = BoostConfig.normalizeActiveBoosts(profile.ActiveBoosts)
-	profile.Potions = PotionConfig.normalizeInventory(profile.Potions)
-	profile.Ascensions = getNonNegativeInteger(profile.Ascensions)
-	profile.AscensionStars = getNonNegativeInteger(profile.AscensionStars)
-	profile.AscensionUpgrades = if typeof(profile.AscensionUpgrades) == "table" then profile.AscensionUpgrades else {}
 	updateProgressRecords(profile, stats, ritualPower)
+	queueProgressionReadiness(profile)
 
 	return stats, equippedPetPower, ritualPower
 end
 
-local function collectCrystalRewardWithRush(profile, stats)
-	local didCollect, awardedEssence, reward = CrystalCombat.collectFinishedReward(profile, stats)
+local function isEssenceCapacityFull(profile, stats)
+	local capacity = getNonNegativeInteger(if typeof(stats) == "table" then stats.Capacity else 0)
+	local essence = getNonNegativeInteger(profile.Essence)
 
-	if didCollect == true and awardedEssence > 0 and reward > 0 then
-		RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.CrystalBroken)
+	return essence >= capacity
+end
+
+local function didLockedZoneUnlockEligibilityChange(profile, beforeEssence, afterEssence)
+	local safeBeforeEssence = getNonNegativeInteger(beforeEssence)
+	local safeAfterEssence = getNonNegativeInteger(afterEssence)
+
+	if safeBeforeEssence == safeAfterEssence then
+		return false
 	end
 
-	return didCollect, awardedEssence, reward
+	local unlockedZones = if typeof(profile.UnlockedZones) == "table" then profile.UnlockedZones else {}
+
+	for _, zoneId in ipairs(ZoneConfig.getZoneIds()) do
+		local zone = ZoneConfig.getZone(zoneId)
+
+		if zone ~= nil and unlockedZones[zoneId] ~= true then
+			local previousZoneId = ZoneConfig.getPreviousZoneId(zoneId)
+			local prerequisiteMet = previousZoneId == nil or unlockedZones[previousZoneId] == true
+
+			if prerequisiteMet then
+				local unlockCost = getNonNegativeInteger(zone.UnlockCost)
+				local wasEligible = safeBeforeEssence >= unlockCost
+				local isEligible = safeAfterEssence >= unlockCost
+
+				if wasEligible ~= isEligible then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+local function queueCapacityFullTransition(profile, wasFull)
+	local _, nextStats = PlayerDerivedState.getCurrentRitualRuntime(profile)
+	local isFull = isEssenceCapacityFull(profile, nextStats)
+
+	if not wasFull and isFull then
+		local capacityState, pauseReason = RuneFocusProgress.getCapacityState(profile, nextStats)
+
+		RuneFocusProgress.queueCapacityFull(
+			profile,
+			capacityState == RuneFocusProgress.CapacityStates.FullCharging,
+			pauseReason
+		)
+	end
+
+	return nextStats
+end
+
+local function awardCrystalBreakRush(profile, breakCount, runeLevelsGained)
+	local awardedPoints = 0
+
+	if breakCount > 0 then
+		awardedPoints = addExactIntegers(awardedPoints, RitualRushProgress.awardPoints(
+			profile,
+			RitualRushConfig.PointSources.CrystalBroken,
+			breakCount
+		))
+	end
+
+	if runeLevelsGained > 0 then
+		awardedPoints = addExactIntegers(awardedPoints, RitualRushProgress.awardPoints(
+			profile,
+			RitualRushConfig.PointSources.RuneLevel,
+			runeLevelsGained
+		))
+	end
+
+	return awardedPoints
+end
+
+local function collectCrystalRewardWithRush(profile, stats)
+	local wasFull = isEssenceCapacityFull(profile, stats)
+	local breakResult = CrystalCombat.collectFinishedReward(profile, stats)
+	local rushPointsAwarded = 0
+
+	if breakResult.Finalized then
+		rushPointsAwarded = awardCrystalBreakRush(profile, 1, breakResult.RuneLevelsGained or 0)
+		queueCapacityFullTransition(profile, wasFull)
+	end
+
+	return breakResult.Changed == true or rushPointsAwarded > 0,
+		breakResult.EssenceAwarded or 0,
+		breakResult.ActualCrystalReward or 0
 end
 
 local function syncAndCollectCrystalReward(profile)
@@ -425,20 +543,20 @@ local function syncAndCollectCrystalReward(profile)
 end
 
 local function getAvailableEssenceCapacity(profile, stats)
-	local capacity = if typeof(stats) == "table" and typeof(stats.Capacity) == "number" then stats.Capacity else 0
-	local essence = if typeof(profile.Essence) == "number" then profile.Essence else 0
+	local capacity = getNonNegativeInteger(if typeof(stats) == "table" then stats.Capacity else 0)
+	local essence = getNonNegativeInteger(profile.Essence)
 
-	return math.max(0, capacity - math.max(0, math.floor(essence)))
+	return math.max(0, capacity - essence)
 end
 
 local function getPositiveInteger(value)
-	if typeof(value) ~= "number" then
+	if typeof(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
 		return nil
 	end
 
 	local integer = math.floor(value)
 
-	if integer <= 0 or integer ~= value then
+	if integer <= 0 or integer ~= value or integer > ProfileContract.MaximumExactInteger then
 		return nil
 	end
 
@@ -459,34 +577,34 @@ local function reconcileActiveBoosts(profile)
 	return profile.ActiveBoosts
 end
 
-local function reconcilePotions(profile)
-	profile.Potions = PotionConfig.normalizeInventory(profile.Potions)
-
-	return profile.Potions
-end
-
-local function applyRitualGemGrant(profile, ritualGems)
-	local amount = getPositiveInteger(ritualGems)
-
-	if amount == nil then
-		return 0
-	end
-
-	profile.RitualGems = math.max(0, math.floor(profile.RitualGems or 0)) + amount
-
-	return amount
-end
-
-local function applyRitualRushPremiumGrant(profile)
-	local progress = RitualRushProgress.ensureProgress(profile)
-
-	if progress == nil then
+local function areShallowTablesEqual(left, right)
+	if typeof(left) ~= "table" or typeof(right) ~= "table" then
 		return false
 	end
 
-	progress.PremiumUnlocked = true
+	for key, value in pairs(left) do
+		if right[key] ~= value then
+			return false
+		end
+	end
+
+	for key, value in pairs(right) do
+		if left[key] ~= value then
+			return false
+		end
+	end
 
 	return true
+end
+
+local function reconcilePotions(profile)
+	local previousPotions = profile.Potions
+	local normalizedPotions = PotionConfig.normalizeInventory(previousPotions)
+	local didChange = not areShallowTablesEqual(previousPotions, normalizedPotions)
+
+	profile.Potions = normalizedPotions
+
+	return normalizedPotions, didChange
 end
 
 local function applyBoostGrant(profile, boostGrant)
@@ -519,32 +637,68 @@ local function applyShopProductGrant(profile, product)
 	end
 
 	local grant = product.Grant
+	local supportedGrantKeys = {
+		RitualGems = true,
+		RitualRushPremium = true,
+		Boost = true,
+	}
+
+	for grantKey in pairs(grant) do
+		if supportedGrantKeys[grantKey] ~= true then
+			return false, "ProductGrantUnsupported"
+		end
+	end
+
 	local reward = {}
 	local didGrant = false
+	local stagedRitualGems = nil
+	local stagedRitualRush = nil
+	local stagedActiveBoosts = nil
 
-	local ritualGemsGranted = applyRitualGemGrant(profile, grant.RitualGems)
+	if grant.RitualGems ~= nil then
+		local requestedRitualGems = getPositiveInteger(grant.RitualGems)
 
-	if ritualGemsGranted > 0 then
+		if requestedRitualGems == nil then
+			return false, "RitualGemGrantInvalid"
+		end
+
+		local currentRitualGems = math.clamp(
+			getNonNegativeInteger(profile.RitualGems),
+			0,
+			ProfileContract.MaximumExactInteger
+		)
+		local ritualGemsGranted = math.min(
+			requestedRitualGems,
+			ProfileContract.MaximumExactInteger - currentRitualGems
+		)
+
+		stagedRitualGems = currentRitualGems + ritualGemsGranted
 		reward.RitualGems = ritualGemsGranted
 		didGrant = true
 	end
 
-	if grant.RitualRushPremium == true then
-		if not applyRitualRushPremiumGrant(profile) then
-			return false, "RitualRushProgressMissing"
+	if grant.RitualRushPremium ~= nil then
+		if grant.RitualRushPremium ~= true then
+			return false, "RitualRushPremiumGrantInvalid"
 		end
 
+		stagedRitualRush = RitualRushConfig.reconcileProgress(profile.RitualRush)
+		stagedRitualRush.PremiumUnlocked = true
 		reward.RitualRushPremium = true
 		didGrant = true
 	end
 
 	if grant.Boost ~= nil then
-		local didApplyBoost, boostReward = applyBoostGrant(profile, grant.Boost)
+		local didApplyBoost, boostReward, nextActiveBoosts = BoostConfig.applyBoostGrant(
+			profile.ActiveBoosts,
+			grant.Boost
+		)
 
 		if not didApplyBoost then
 			return false, boostReward
 		end
 
+		stagedActiveBoosts = nextActiveBoosts
 		reward.Boost = boostReward
 		didGrant = true
 	end
@@ -553,33 +707,75 @@ local function applyShopProductGrant(profile, product)
 		return false, "ProductGrantEmpty"
 	end
 
+	-- Commit the complete staged grant without yielding. A malformed future
+	-- compound product can never leave a partial unmarked purchase behind.
+	if stagedRitualGems ~= nil then
+		profile.RitualGems = stagedRitualGems
+	end
+
+	if stagedRitualRush ~= nil then
+		profile.RitualRush = stagedRitualRush
+	end
+
+	if stagedActiveBoosts ~= nil then
+		profile.ActiveBoosts = stagedActiveBoosts
+	end
+
 	return true, reward
 end
 
-local function saveProfileForPurchase(player, profile)
-	local success, result = pcall(function()
+local function saveProfileForPurchase(player, profile, purchaseId)
+	local callSucceeded, saveSucceeded, reason = pcall(function()
 		commitProfileForPersistence(profile)
 
-		return ProfilePersistence.save(player, profile)
+		return ProfilePersistence.saveConfirmed(player, profile, function(savedData)
+			return typeof(savedData) == "table"
+				and typeof(savedData.ProcessedPurchaseIds) == "table"
+				and savedData.ProcessedPurchaseIds[purchaseId] == true
+		end)
 	end)
 
-	return success and result == true
+	if not callSucceeded then
+		return false, "save_confirmation_failed"
+	end
+
+	return saveSucceeded == true, reason
 end
 
 local function applyRitualRushReward(profile, reward, stats)
-	local essenceReward = math.max(0, math.floor(reward.Essence or 0))
-	local ritualGemsAwarded = math.max(0, math.floor(reward.RitualGems or 0))
+	local wasFull = isEssenceCapacityFull(profile, stats)
+	local essenceReward = getNonNegativeInteger(reward.Essence)
+	local ritualGemsAwarded = getNonNegativeInteger(reward.RitualGems)
 	local potionRewards = {}
 
 	local essenceAwarded = 0
+	local autoCapacityResult = {
+		Changed = false,
+		LevelsBought = 0,
+		EssenceSpent = 0,
+	}
 
 	if essenceReward > 0 then
 		essenceAwarded = math.min(essenceReward, getAvailableEssenceCapacity(profile, stats))
-		profile.Essence = math.max(0, math.floor(profile.Essence or 0)) + essenceAwarded
+		profile.Essence = addExactIntegers(profile.Essence, essenceAwarded)
+
+		if essenceAwarded > 0 then
+			autoCapacityResult = RitualStoneProgress.purchaseAutoCapacity(profile)
+		end
 	end
 
 	if ritualGemsAwarded > 0 then
-		profile.RitualGems = math.max(0, math.floor(profile.RitualGems or 0)) + ritualGemsAwarded
+		local currentRitualGems = math.clamp(
+			getNonNegativeInteger(profile.RitualGems),
+			0,
+			ProfileContract.MaximumExactInteger
+		)
+
+		ritualGemsAwarded = math.min(
+			ritualGemsAwarded,
+			ProfileContract.MaximumExactInteger - currentRitualGems
+		)
+		profile.RitualGems = currentRitualGems + ritualGemsAwarded
 	end
 
 	if typeof(reward.Potions) == "table" then
@@ -592,10 +788,13 @@ local function applyRitualRushReward(profile, reward, stats)
 		end
 	end
 
+	queueCapacityFullTransition(profile, wasFull)
+
 	return {
 		Essence = essenceAwarded,
 		RitualGems = ritualGemsAwarded,
 		Potions = potionRewards,
+		AutoCapacity = autoCapacityResult,
 	}
 end
 
@@ -606,12 +805,14 @@ local function hasRitualRushRewardValue(reward)
 
 	local potionCount = if typeof(reward.Potions) == "table" then #reward.Potions else 0
 
-	return (reward.Essence or 0) > 0 or (reward.RitualGems or 0) > 0 or potionCount > 0
+	return getNonNegativeInteger(reward.Essence) > 0
+		or getNonNegativeInteger(reward.RitualGems) > 0
+		or potionCount > 0
 end
 
 local function addRitualRushReward(totalReward, reward)
-	totalReward.Essence += math.max(0, math.floor(reward.Essence or 0))
-	totalReward.RitualGems += math.max(0, math.floor(reward.RitualGems or 0))
+	totalReward.Essence = addExactIntegers(totalReward.Essence, reward.Essence)
+	totalReward.RitualGems = addExactIntegers(totalReward.RitualGems, reward.RitualGems)
 
 	if typeof(totalReward.Potions) ~= "table" then
 		totalReward.Potions = {}
@@ -626,6 +827,77 @@ local function addRitualRushReward(totalReward, reward)
 			end
 		end
 	end
+end
+
+local function inspectRitualRushClaim(progress, milestone, track)
+	if typeof(progress) ~= "table" or typeof(milestone) ~= "table" then
+		return nil, "ritual_rush_reward_not_configured"
+	end
+
+	local milestoneId = milestone.MilestoneId
+	local requiredPoints = getPositiveInteger(milestone.RequiredPoints)
+
+	if typeof(milestoneId) ~= "string" or requiredPoints == nil then
+		return nil, "ritual_rush_reward_not_configured"
+	end
+
+	if getNonNegativeInteger(progress.Points) < requiredPoints then
+		return nil, "ritual_rush_milestone_locked"
+	end
+
+	local claimedFreeMilestones = if typeof(progress.ClaimedFreeMilestones) == "table"
+		then progress.ClaimedFreeMilestones
+		else {}
+	local claimedPremiumMilestones = if typeof(progress.ClaimedPremiumMilestones) == "table"
+		then progress.ClaimedPremiumMilestones
+		else {}
+	local wantsFree = track == nil or track == "free"
+	local wantsPremium = track == nil or track == "premium"
+
+	if track == "premium" and progress.PremiumUnlocked ~= true then
+		return nil, "ritual_rush_premium_locked"
+	end
+
+	local claimFree = wantsFree and claimedFreeMilestones[milestoneId] ~= true
+	local claimPremium = wantsPremium
+		and progress.PremiumUnlocked == true
+		and claimedPremiumMilestones[milestoneId] ~= true
+
+	if claimFree and not hasRitualRushRewardValue(milestone.FreeReward) then
+		return nil, "ritual_rush_reward_not_configured"
+	end
+
+	if claimPremium and not hasRitualRushRewardValue(milestone.PremiumReward) then
+		return nil, "ritual_rush_reward_not_configured"
+	end
+
+	if not claimFree and not claimPremium then
+		return nil, "ritual_rush_reward_already_claimed"
+	end
+
+	return {
+		Free = claimFree,
+		Premium = claimPremium,
+	}, nil
+end
+
+local function createRitualRushClaimFailure(code, changed, milestoneId)
+	local messages = {
+		invalid_ritual_rush_track = "Invalid Ritual Rush reward track.",
+		ritual_rush_milestone_locked = "Ritual Rush milestone is locked.",
+		ritual_rush_premium_locked = "Premium Ritual Rush is locked.",
+		ritual_rush_reward_already_claimed = "Ritual Rush reward is already claimed.",
+		ritual_rush_reward_not_configured = "Ritual Rush reward is not configured.",
+		ritual_rush_event_changed = "The Ritual Rush event changed before the reward could be claimed.",
+	}
+
+	return {
+		Ok = false,
+		Changed = changed == true,
+		Code = code,
+		Message = messages[code] or "Ritual Rush reward could not be claimed.",
+		MilestoneId = milestoneId,
+	}
 end
 
 local function getCharacterRootPosition(player)
@@ -722,8 +994,29 @@ local function teleportPlayerToZone(player, zoneId)
 	return false
 end
 
+local function getProfileRecord(player)
+	return profileRecordsByPlayer[player]
+end
+
 function PlayerStateService.getProfile(player)
-	return profilesByPlayer[player]
+	local record = getProfileRecord(player)
+
+	if
+		record == nil
+		or not ProfilePersistence.isCurrent(player, record.Profile, record.Token)
+	then
+		return nil
+	end
+
+	return record.Profile
+end
+
+function PlayerStateService.isCurrentProfile(player, expectedProfile)
+	local record = getProfileRecord(player)
+
+	return record ~= nil
+		and record.Profile == expectedProfile
+		and ProfilePersistence.isCurrent(player, expectedProfile, record.Token)
 end
 
 function PlayerStateService.withProfileLock(player, callback)
@@ -774,20 +1067,30 @@ function PlayerStateService.waitForProfile(player, timeoutSeconds)
 	return profile
 end
 
-function PlayerStateService.getSnapshot(player)
-	local profile = PlayerStateService.getProfile(player)
+local function resolveCurrentProfile(player, expectedProfile)
+	local profile = expectedProfile or PlayerStateService.getProfile(player)
+
+	if profile == nil or not PlayerStateService.isCurrentProfile(player, profile) then
+		return nil
+	end
+
+	return profile
+end
+
+function PlayerStateService.getSnapshot(player, expectedProfile)
+	local profile = resolveCurrentProfile(player, expectedProfile)
 
 	return PlayerDerivedState.getSnapshot(profile)
 end
 
-function PlayerStateService.getPublicVisual(player)
-	local profile = PlayerStateService.getProfile(player)
+function PlayerStateService.getPublicVisual(player, expectedProfile)
+	local profile = resolveCurrentProfile(player, expectedProfile)
 
 	return PlayerDerivedState.getPublicVisual(profile)
 end
 
-function PlayerStateService.publishPublicVisual(player)
-	local publicVisual = PlayerStateService.getPublicVisual(player)
+function PlayerStateService.publishPublicVisual(player, expectedProfile)
+	local publicVisual = PlayerStateService.getPublicVisual(player, expectedProfile)
 
 	if publicVisual == nil then
 		return nil
@@ -798,14 +1101,36 @@ function PlayerStateService.publishPublicVisual(player)
 	return publicVisual
 end
 
-function PlayerStateService.getCrystalUpdate(player)
-	local profile = PlayerStateService.getProfile(player)
+function PlayerStateService.getCrystalUpdate(player, expectedProfile, requestedSections)
+	local profile = resolveCurrentProfile(player, expectedProfile)
 
-	return PlayerDerivedState.getCrystalUpdate(profile)
+	return PlayerDerivedState.getCrystalUpdate(profile, requestedSections)
 end
 
-function PlayerStateService.updateLeaderstatsFromProfile(player)
-	local profile = PlayerStateService.getProfile(player)
+function PlayerStateService.getPlayerStateSections(player, expectedProfile, requestedSections)
+	local profile = resolveCurrentProfile(player, expectedProfile)
+
+	return PlayerDerivedState.getPlayerStateSections(profile, requestedSections)
+end
+
+function PlayerStateService.takeFeedback(player, expectedProfile, maximumRecords)
+	local profile = resolveCurrentProfile(player, expectedProfile)
+
+	if profile == nil then
+		return {}
+	end
+
+	return RuneFocusProgress.drainFeedback(profile, os.clock(), maximumRecords)
+end
+
+function PlayerStateService.hasReadyFeedback(player, expectedProfile)
+	local profile = resolveCurrentProfile(player, expectedProfile)
+
+	return profile ~= nil and RuneFocusProgress.hasReadyFeedback(profile, os.clock())
+end
+
+function PlayerStateService.updateLeaderstatsFromProfile(player, expectedProfile)
+	local profile = resolveCurrentProfile(player, expectedProfile)
 
 	if profile == nil then
 		return false
@@ -820,14 +1145,14 @@ function PlayerStateService.subscribePublicVisualChanged(listener)
 	return PlayerPublicVisualSignal.subscribe(listener)
 end
 
-function PlayerStateService.advanceSnapshotRevision(player)
-	local profile = PlayerStateService.getProfile(player)
+function PlayerStateService.advanceSnapshotRevision(player, expectedProfile)
+	local profile = resolveCurrentProfile(player, expectedProfile)
 
 	if profile == nil then
 		return nil
 	end
 
-	profile.SnapshotRevision = (profile.SnapshotRevision or 0) + 1
+	profile.SnapshotRevision = addExactIntegers(profile.SnapshotRevision, 1)
 
 	return profile.SnapshotRevision
 end
@@ -864,14 +1189,16 @@ function PlayerStateService.enterActiveZone(player, zoneId)
 
 	local ok, zoneChanged, reason = switchCurrentZone(profile, zoneId)
 	local activeChanged = CrystalCombat.setFarmingActive(profile, ok)
+	local onboardingChanged = false
 
 	if ok then
 		CrystalCombat.ensureState(profile)
+		onboardingChanged = completeOnboardingMilestone(profile, "entered_crystal_zone")
 	end
 
 	return {
 		Ok = ok,
-		Changed = zoneChanged or activeChanged,
+		Changed = zoneChanged or activeChanged or onboardingChanged,
 		Reason = reason,
 		ZoneId = zoneId,
 	}
@@ -921,49 +1248,101 @@ function PlayerStateService.processCrystalFarming(player)
 
 	local now = os.clock()
 	local runeBonuses, stats = PlayerDerivedState.getCurrentRitualRuntime(profile)
+	local beforeEssence = getNonNegativeInteger(profile.Essence)
+	local wasFull = isEssenceCapacityFull(profile, stats)
 	local farmingStep = CrystalCombat.step(profile, stats, runeBonuses, now)
-	local rushPointsAwarded = 0
+	local rushPointsAwarded = awardCrystalBreakRush(
+		profile,
+		farmingStep.BreakCount or 0,
+		farmingStep.RuneLevelsGained or 0
+	)
 
-	if (farmingStep.BreakCount or 0) > 0 then
-		rushPointsAwarded = RitualRushProgress.awardPoints(
-			profile,
-			RitualRushConfig.PointSources.CrystalBroken,
-			farmingStep.BreakCount
-		)
+	if farmingStep.Changed == true then
+		queueCapacityFullTransition(profile, wasFull)
+	end
+
+	local breakCount = farmingStep.BreakCount or 0
+	local runeLevelsGained = farmingStep.RuneLevelsGained or 0
+	local autoCapacityLevelsBought = farmingStep.AutoCapacityLevelsBought or 0
+	local zoneUnlockEligibilityChanged = didLockedZoneUnlockEligibilityChange(
+		profile,
+		beforeEssence,
+		profile.Essence
+	)
+	local dirtySections = {
+		Crystal = true,
+	}
+
+	if zoneUnlockEligibilityChanged then
+		dirtySections.Zones = true
+	end
+
+	if breakCount > 0 then
+		dirtySections.Essence = true
+		dirtySections.Rebirth = true
+		dirtySections.RuneFocus = true
+		dirtySections.RitualRush = true
+		dirtySections.RitualPower = true
+	end
+
+	if autoCapacityLevelsBought > 0 then
+		dirtySections.Essence = true
+		dirtySections.StoneLevels = true
+		dirtySections.StoneStats = true
+		dirtySections.NextUpgradeCosts = true
+		dirtySections.Rebirth = true
+		dirtySections.Automation = true
+		dirtySections.RuneFocus = true
+		dirtySections.RitualRush = true
+		dirtySections.Onboarding = true
+		dirtySections.Crystal = true
+		dirtySections.BestRitualPower = true
+		dirtySections.HighestCapacity = true
+		dirtySections.RitualPower = true
+	end
+
+	if runeLevelsGained > 0 then
+		dirtySections.StoneStats = true
+		dirtySections.NextUpgradeCosts = true
+		dirtySections.Roll = true
+		dirtySections.Pets = true
+		dirtySections.EquippedPets = true
+		dirtySections.BestRitualPower = true
+		dirtySections.HighestCapacity = true
+		dirtySections.RitualPower = true
 	end
 
 	return {
 		Ok = true,
 		Changed = farmingStep.Changed == true or rushPointsAwarded > 0,
+		Code = if farmingStep.Changed == true or rushPointsAwarded > 0 then "crystal_farming_updated" else "no_change",
 		Reason = farmingStep.Reason,
 		ZoneId = farmingStep.ZoneId,
 		AttackCount = farmingStep.AttackCount,
 		BreakCount = farmingStep.BreakCount,
+		RuneChargeApplied = farmingStep.RuneChargeApplied,
+		RuneLevelsGained = runeLevelsGained,
+		AutoCapacityLevelsBought = autoCapacityLevelsBought,
+		AutoCapacityEssenceSpent = farmingStep.AutoCapacityEssenceSpent or 0,
+		UsePlayerStateUpdated = autoCapacityLevelsBought > 0 or runeLevelsGained > 0,
+		DirtySections = dirtySections,
 	}
 end
 
-function PlayerStateService.syncProfile(player)
-	local profile = PlayerStateService.getProfile(player)
+function PlayerStateService.syncProfile(player, expectedProfile)
+	local profile = resolveCurrentProfile(player, expectedProfile)
 
 	if profile == nil then
 		return false
 	end
 
 	commitProfileForPersistence(profile)
+
+	if not PlayerStateService.isCurrentProfile(player, profile) then
+		return false
+	end
 
 	return ProfilePersistence.sync(player, profile)
-end
-
-function PlayerStateService.savePlayer(player)
-	local profile = PlayerStateService.getProfile(player)
-
-	if profile == nil then
-		return false
-	end
-
-	commitProfileForPersistence(profile)
-
-	return ProfilePersistence.save(player, profile)
 end
 
 function PlayerStateService.processShopReceipt(player, receiptInfo, product)
@@ -985,7 +1364,11 @@ function PlayerStateService.processShopReceipt(player, receiptInfo, product)
 	local receiptProductId = getPositiveInteger(receiptInfo.ProductId)
 	local productRobloxProductId = ShopProductConfig.getRobloxProductId(product)
 
-	if typeof(purchaseId) ~= "string" or purchaseId == "" then
+	if
+		typeof(purchaseId) ~= "string"
+		or purchaseId == ""
+		or #purchaseId > ProfileContract.MaximumReceiptLength
+	then
 		return {
 			Ok = false,
 			Reason = "ReceiptPurchaseIdInvalid",
@@ -1006,7 +1389,7 @@ function PlayerStateService.processShopReceipt(player, receiptInfo, product)
 		}
 	end
 
-	local profile = PlayerStateService.getProfile(player)
+	local profile = resolveCurrentProfile(player)
 
 	if profile == nil then
 		return {
@@ -1018,7 +1401,9 @@ function PlayerStateService.processShopReceipt(player, receiptInfo, product)
 	local processedPurchaseIds = ensureProcessedPurchaseIds(profile)
 
 	if processedPurchaseIds[purchaseId] == true then
-		if not saveProfileForPurchase(player, profile) then
+		local didSave = saveProfileForPurchase(player, profile, purchaseId)
+
+		if not didSave then
 			return {
 				Ok = false,
 				Reason = "ProfileSaveFailed",
@@ -1045,9 +1430,11 @@ function PlayerStateService.processShopReceipt(player, receiptInfo, product)
 	end
 
 	processedPurchaseIds[purchaseId] = true
-	profile.SnapshotRevision = (profile.SnapshotRevision or 0) + 1
+	profile.SnapshotRevision = addExactIntegers(profile.SnapshotRevision, 1)
 
-	if not saveProfileForPurchase(player, profile) then
+	local didSave = saveProfileForPurchase(player, profile, purchaseId)
+
+	if not didSave then
 		return {
 			Ok = false,
 			Reason = "ProfileSaveFailed",
@@ -1056,8 +1443,8 @@ function PlayerStateService.processShopReceipt(player, receiptInfo, product)
 		}
 	end
 
-	PlayerStateService.updateLeaderstatsFromProfile(player)
-	PlayerStateService.publishPublicVisual(player)
+	PlayerStateService.updateLeaderstatsFromProfile(player, profile)
+	PlayerStateService.publishPublicVisual(player, profile)
 
 	return {
 		Ok = true,
@@ -1067,81 +1454,16 @@ function PlayerStateService.processShopReceipt(player, receiptInfo, product)
 	}
 end
 
-function PlayerStateService.completeTutorialStep(player, stepId, completionMode)
-	local profile = PlayerStateService.getProfile(player)
-
-	if profile == nil then
-		return {
-			Ok = false,
-			Message = "Player profile is not ready.",
-		}
-	end
-
-	if typeof(stepId) ~= "string" or not TutorialConfig.isStepId(stepId) then
-		return {
-			Ok = false,
-			Message = "Invalid tutorial step.",
-		}
-	end
-
-	local resolvedCompletionMode = completionMode or TutorialConfig.CompletionModes.Complete
-
-	if
-		resolvedCompletionMode ~= TutorialConfig.CompletionModes.Complete
-		and resolvedCompletionMode ~= TutorialConfig.CompletionModes.Skip
-	then
-		return {
-			Ok = false,
-			Message = "Invalid tutorial completion mode.",
-		}
-	end
-
-	local completedSteps = ensureTutorialCompletedSteps(profile)
-
-	if completedSteps[stepId] == true then
-		return {
-			Ok = true,
-		}
-	end
-
-	if TutorialConfig.getNextStepId(completedSteps) ~= stepId then
-		return {
-			Ok = false,
-			Message = "Tutorial step is not active.",
-		}
-	end
-
-	if resolvedCompletionMode == TutorialConfig.CompletionModes.Skip then
-		if not TutorialConfig.isSkippable(stepId) then
-			return {
-				Ok = false,
-				Message = "Tutorial step cannot be skipped.",
-			}
-		end
-
-		completeTutorialStep(profile, stepId)
-
-		return {
-			Ok = true,
-			Message = "Tutorial skipped.",
-		}
-	end
-
-	if not TutorialConfig.isClientCompletable(stepId) then
-		return {
-			Ok = false,
-			Message = "Tutorial step is completed by gameplay.",
-		}
-	end
-
-	completeTutorialStep(profile, stepId)
-
+function PlayerStateService.completeTutorialStep(_player, _stepId, _completionMode)
 	return {
-		Ok = true,
+		Ok = false,
+		Changed = false,
+		Code = "deprecated_action",
+		Message = "Tutorial completion is now driven by server gameplay milestones.",
 	}
 end
 
-function PlayerStateService.claimRitualRushReward(player, milestoneId)
+function PlayerStateService.claimRitualRushReward(player, milestoneId, track)
 	local profile = PlayerStateService.getProfile(player)
 
 	if profile == nil then
@@ -1151,32 +1473,72 @@ function PlayerStateService.claimRitualRushReward(player, milestoneId)
 		}
 	end
 
-	if typeof(milestoneId) ~= "string" then
+	if
+		typeof(milestoneId) ~= "string"
+		or #milestoneId == 0
+		or #milestoneId > ProfileContract.MaximumIdentifierLength
+	then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "invalid_ritual_rush_milestone",
 			Message = "Invalid Ritual Rush reward.",
 		}
 	end
 
 	local milestone = RitualRushConfig.getMilestone(milestoneId)
 
-	if milestone == nil then
+	if milestone == nil or table.find(RitualRushConfig.MilestoneOrder, milestoneId) == nil then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "ritual_rush_reward_not_configured",
 			Message = "Ritual Rush reward is not configured.",
 		}
 	end
 
-	syncAndCollectCrystalReward(profile)
+	if track ~= nil and track ~= "free" and track ~= "premium" then
+		return createRitualRushClaimFailure(
+			"invalid_ritual_rush_track",
+			false,
+			milestone.MilestoneId
+		)
+	end
 
+	-- Inspect a reconciled current-event copy without changing the profile. A
+	-- locked or fully claimed request cannot use crystal recovery to become valid.
+	local inspectedProgress = RitualRushConfig.reconcileProgress(profile.RitualRush)
+	local inspectedEventId = inspectedProgress.EventId
+	local _, precheckFailure = inspectRitualRushClaim(inspectedProgress, milestone, track)
+
+	if precheckFailure ~= nil then
+		return createRitualRushClaimFailure(precheckFailure, false, milestone.MilestoneId)
+	end
+
+	local previousRushEventId = if typeof(profile.RitualRush) == "table"
+		then profile.RitualRush.EventId
+		else nil
+	local crystalChanged = syncAndCollectCrystalReward(profile)
 	local progress = RitualRushProgress.ensureProgress(profile)
+	local rushEventChanged = progress.EventId ~= previousRushEventId
+	local changedBeforeClaim = crystalChanged == true or rushEventChanged
 
-	if progress.Points < milestone.RequiredPoints then
-		return {
-			Ok = false,
-			Message = "Ritual Rush milestone is locked.",
-			MilestoneId = milestone.MilestoneId,
-		}
+	if progress.EventId ~= inspectedEventId then
+		return createRitualRushClaimFailure(
+			"ritual_rush_event_changed",
+			changedBeforeClaim,
+			milestone.MilestoneId
+		)
+	end
+
+	local claimableTracks, revalidationFailure = inspectRitualRushClaim(progress, milestone, track)
+
+	if revalidationFailure ~= nil then
+		return createRitualRushClaimFailure(
+			revalidationFailure,
+			changedBeforeClaim,
+			milestone.MilestoneId
+		)
 	end
 
 	local claimedTracks = {}
@@ -1186,53 +1548,31 @@ function PlayerStateService.claimRitualRushReward(player, milestoneId)
 		Potions = {},
 	}
 
-	if progress.ClaimedFreeMilestones[milestone.MilestoneId] ~= true then
-		if not hasRitualRushRewardValue(milestone.FreeReward) then
-			return {
-				Ok = false,
-				Message = "Ritual Rush reward is not configured.",
-				MilestoneId = milestone.MilestoneId,
-			}
-		end
-
+	if claimableTracks.Free == true then
 		addRitualRushReward(totalReward, milestone.FreeReward)
-		claimedTracks.Free = true
+		table.insert(claimedTracks, "free")
 	end
 
-	if progress.PremiumUnlocked == true and progress.ClaimedPremiumMilestones[milestone.MilestoneId] ~= true then
-		if not hasRitualRushRewardValue(milestone.PremiumReward) then
-			return {
-				Ok = false,
-				Message = "Ritual Rush reward is not configured.",
-				MilestoneId = milestone.MilestoneId,
-			}
-		end
-
+	if claimableTracks.Premium == true then
 		addRitualRushReward(totalReward, milestone.PremiumReward)
-		claimedTracks.Premium = true
-	end
-
-	if claimedTracks.Free ~= true and claimedTracks.Premium ~= true then
-		return {
-			Ok = false,
-			Message = "Ritual Rush reward is already claimed.",
-			MilestoneId = milestone.MilestoneId,
-		}
+		table.insert(claimedTracks, "premium")
 	end
 
 	local _, stats = PlayerDerivedState.getCurrentRitualRuntime(profile)
 	local appliedReward = applyRitualRushReward(profile, totalReward, stats)
 
-	if claimedTracks.Free == true then
+	if claimableTracks.Free == true then
 		progress.ClaimedFreeMilestones[milestone.MilestoneId] = true
 	end
 
-	if claimedTracks.Premium == true then
+	if claimableTracks.Premium == true then
 		progress.ClaimedPremiumMilestones[milestone.MilestoneId] = true
 	end
 
 	return {
 		Ok = true,
+		Changed = true,
+		Code = "ritual_rush_reward_claimed",
 		Message = "Ritual Rush reward claimed.",
 		MilestoneId = milestone.MilestoneId,
 		ClaimedTracks = claimedTracks,
@@ -1241,7 +1581,7 @@ function PlayerStateService.claimRitualRushReward(player, milestoneId)
 end
 
 function PlayerStateService.claimRitualRushFreeReward(player, milestoneId)
-	return PlayerStateService.claimRitualRushReward(player, milestoneId)
+	return PlayerStateService.claimRitualRushReward(player, milestoneId, "free")
 end
 
 function PlayerStateService.usePotion(player, potionId)
@@ -1250,24 +1590,32 @@ function PlayerStateService.usePotion(player, potionId)
 	if profile == nil then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "profile_not_ready",
 			Message = "Player profile is not ready.",
 		}
 	end
 
-	if typeof(potionId) ~= "string" then
+	if
+		typeof(potionId) ~= "string"
+		or #potionId == 0
+		or #potionId > ProfileContract.MaximumIdentifierLength
+	then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "invalid_potion",
 			Message = "Invalid potion.",
 		}
 	end
 
-	reconcilePotions(profile)
-
 	local potion = PotionConfig.getPotion(potionId)
 
-	if potion == nil then
+	if potion == nil or table.find(PotionConfig.PotionOrder, potionId) == nil then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "potion_not_configured",
 			Message = "Potion is not configured.",
 		}
 	end
@@ -1277,25 +1625,46 @@ function PlayerStateService.usePotion(player, potionId)
 	if boostGrant == nil then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "potion_effect_not_configured",
 			Message = "Potion effect is not configured.",
 			PotionId = potion.PotionId,
 		}
 	end
 
-	syncAndCollectCrystalReward(profile)
+	-- Validate ownership against a normalized copy before crystal settlement so
+	-- an invalid request cannot mutate otherwise unrelated progression.
+	local inspectedPotions = PotionConfig.normalizeInventory(profile.Potions)
+
+	if (inspectedPotions[potion.PotionId] or 0) <= 0 then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "potion_not_owned",
+			Message = "You do not own this potion.",
+			PotionId = potion.PotionId,
+		}
+	end
+
+	local potionInventoryChanged = not areShallowTablesEqual(profile.Potions, inspectedPotions)
+
+	local crystalChanged = syncAndCollectCrystalReward(profile)
 
 	local didConsumePotion, consumeResult, potions = PotionConfig.consumePotion(profile.Potions, potion.PotionId)
-	profile.Potions = potions
 
 	if not didConsumePotion then
 		local message = if consumeResult == "PotionNotOwned" then "You do not own this potion." else "Potion cannot be used."
 
 		return {
 			Ok = false,
+			Changed = crystalChanged == true,
+			Code = if consumeResult == "PotionNotOwned" then "potion_not_owned" else "potion_use_failed",
 			Message = message,
 			PotionId = potion.PotionId,
 		}
 	end
+
+	profile.Potions = potions
 
 	local didApplyBoost, boostReward = applyBoostGrant(profile, boostGrant)
 
@@ -1307,6 +1676,8 @@ function PlayerStateService.usePotion(player, potionId)
 
 		return {
 			Ok = false,
+			Changed = potionInventoryChanged or crystalChanged,
+			Code = "potion_effect_apply_failed",
 			Message = "Potion effect could not be applied.",
 			PotionId = potion.PotionId,
 		}
@@ -1316,6 +1687,8 @@ function PlayerStateService.usePotion(player, potionId)
 
 	return {
 		Ok = true,
+		Changed = true,
+		Code = "potion_used",
 		Message = "Potion used.",
 		Potion = {
 			PotionId = potion.PotionId,
@@ -1342,13 +1715,14 @@ function PlayerStateService.buyPotionWithGems(player, potionId)
 		}
 	end
 
-	reconcilePotions(profile)
+	local _, potionInventoryChanged = reconcilePotions(profile)
 
 	local potion = PotionConfig.getPotion(potionId)
 
 	if potion == nil or potion.IsShopEnabled ~= true then
 		return {
 			Ok = false,
+			Changed = potionInventoryChanged,
 			Message = "Potion is not available.",
 		}
 	end
@@ -1358,16 +1732,18 @@ function PlayerStateService.buyPotionWithGems(player, potionId)
 	if gemCost == nil then
 		return {
 			Ok = false,
+			Changed = potionInventoryChanged,
 			Message = "Potion price is not configured.",
 			PotionId = potion.PotionId,
 		}
 	end
 
-	local ritualGems = math.max(0, math.floor(profile.RitualGems or 0))
+	local ritualGems = getNonNegativeInteger(profile.RitualGems)
 
 	if ritualGems < gemCost then
 		return {
 			Ok = false,
+			Changed = potionInventoryChanged,
 			Message = "Not enough Ritual Gems.",
 			PotionId = potion.PotionId,
 			Cost = gemCost,
@@ -1382,10 +1758,11 @@ function PlayerStateService.buyPotionWithGems(player, potionId)
 	})
 
 	if not didApplyPotion then
-		profile.RitualGems += gemCost
+		profile.RitualGems = addExactIntegers(profile.RitualGems, gemCost)
 
 		return {
 			Ok = false,
+			Changed = potionInventoryChanged,
 			Message = "Potion could not be added.",
 			PotionId = potion.PotionId,
 		}
@@ -1393,6 +1770,7 @@ function PlayerStateService.buyPotionWithGems(player, potionId)
 
 	return {
 		Ok = true,
+		Changed = true,
 		Message = "Potion purchased.",
 		Potion = potionReward,
 		Cost = gemCost,
@@ -1405,23 +1783,55 @@ function PlayerStateService.rebirth(player)
 	if profile == nil then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "profile_not_ready",
 			Message = "Player profile is not ready.",
 		}
 	end
 
-	syncAndCollectCrystalReward(profile)
+	if hasPendingAwayClaim(profile) then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "away_claim_required",
+			Message = "Claim or dismiss your away reward before rebirthing.",
+		}
+	end
+
+	if getNonNegativeInteger(profile.Rebirths) >= ProfileContract.MaximumExactInteger then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "rebirth_count_maxed",
+			Message = "Rebirth count has reached the exact-integer limit.",
+		}
+	end
 
 	local rebirthRequirement = RitualStoneConfig.getRebirthRequirement(profile.Rebirths)
 
 	if not PlayerDerivedState.canRebirth(profile, rebirthRequirement) then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "rebirth_requirements_not_met",
 			Message = "Rebirth requirement is not met.",
 		}
 	end
 
-	profile.Rebirths += 1
-	completeTutorialThroughStep(profile, TutorialConfig.StepIds.FirstRebirth)
+	local crystalChanged = syncAndCollectCrystalReward(profile)
+	local currentRequirement = RitualStoneConfig.getRebirthRequirement(profile.Rebirths)
+
+	if not PlayerDerivedState.canRebirth(profile, currentRequirement) then
+		return {
+			Ok = false,
+			Changed = crystalChanged == true,
+			Code = "rebirth_requirements_changed",
+			Message = "Rebirth requirements changed before the reset could complete.",
+		}
+	end
+
+	profile.Rebirths = addExactIntegers(profile.Rebirths, 1)
+	completeOnboardingMilestone(profile, "first_rebirth")
 	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.Rebirth)
 	profile.Essence = 0
 	profile.CurrentZone = 1
@@ -1429,12 +1839,20 @@ function PlayerStateService.rebirth(player)
 		[1] = true,
 	}
 	profile.StoneLevels = createDefaultStoneLevels()
+	profile.RollReadyAt = 0
+	profile.ProgressionEpoch = addExactIntegers(profile.ProgressionEpoch, 1)
+	profile.RuneFocusSelectionReadyAt = 0
 	CrystalCombat.resetState(profile, 1)
 	CrystalCombat.setFarmingActive(profile, false)
+	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.RebirthComplete, {
+		Rebirths = profile.Rebirths,
+	})
 	task.defer(teleportPlayerToZone, player, 1)
 
 	return {
 		Ok = true,
+		Changed = true,
+		Code = "rebirth_complete",
 		Message = "Rebirth complete. Permanent power increased.",
 	}
 end
@@ -1445,127 +1863,321 @@ function PlayerStateService.ascend(player)
 	if profile == nil then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "profile_not_ready",
 			Message = "Player profile is not ready.",
 		}
 	end
 
-	syncAndCollectCrystalReward(profile)
+	if hasPendingAwayClaim(profile) then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "away_claim_required",
+			Message = "Claim or dismiss your away reward before ascending.",
+		}
+	end
 
-	local ascension = AscensionConfig.getSnapshot(profile)
+	local ascension = PlayerDerivedState.getAscensionSnapshot(profile)
+
+	if ascension.HasNextMilestone ~= true then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "v1_complete",
+			Message = "All current Ascension milestones are complete.",
+			Ascension = ascension.Count,
+		}
+	end
 
 	if ascension.RequiredZoneExists ~= true then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "ascension_zone_unavailable",
 			Message = "The next Ascension zone is not available yet.",
-			Ascension = ascension,
+			Ascension = ascension.Count,
 		}
 	end
 
 	if ascension.CanAscend ~= true then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "ascension_requirements_not_met",
 			Message = "Reach Zone " .. tostring(ascension.RequiredZone) .. " to ascend.",
-			Ascension = ascension,
+			Ascension = ascension.Count,
 		}
 	end
 
 	if not isPositionNearAscensionStatue(ascension.RequiredZone, getLivingCharacterRootPosition(player)) then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "ascension_statue_too_far",
 			Message = "Move closer to the Ascension Statue.",
-			Ascension = ascension,
+			Ascension = ascension.Count,
+		}
+	end
+
+	local crystalChanged = syncAndCollectCrystalReward(profile)
+	local currentAscension = PlayerDerivedState.getAscensionSnapshot(profile)
+
+	if
+		currentAscension.HasNextMilestone ~= true
+		or currentAscension.Count ~= ascension.Count
+		or currentAscension.CanAscend ~= true
+		or not isPositionNearAscensionStatue(
+			currentAscension.RequiredZone,
+			getLivingCharacterRootPosition(player)
+		)
+	then
+		return {
+			Ok = false,
+			Changed = crystalChanged == true,
+			Code = "ascension_requirements_changed",
+			Message = "Ascension requirements changed before the reset could complete.",
+			Ascension = currentAscension.Count,
 		}
 	end
 
 	local currentAscensions = getNonNegativeInteger(profile.Ascensions)
-	local nextAscensions = currentAscensions + 1
+	local nextAscensions = math.min(#AscensionConfig.Milestones, currentAscensions + 1)
 	local starReward = AscensionConfig.getStarReward(currentAscensions)
 
 	profile.Ascensions = nextAscensions
-	profile.AscensionStars = getNonNegativeInteger(profile.AscensionStars) + starReward
+	profile.AscensionStars = addExactIntegers(profile.AscensionStars, starReward)
 	profile.Essence = 0
 	profile.CurrentZone = 1
 	profile.UnlockedZones = {
 		[1] = true,
 	}
 	profile.StoneLevels = createDefaultStoneLevels()
-	profile.RuneLevels = createDefaultRuneLevels()
+	RuneFocusProgress.clearChargeFeedback(profile)
+	resetRuneFocusForAscension(profile)
+	profile.RollReadyAt = 0
+	profile.ProgressionEpoch = addExactIntegers(profile.ProgressionEpoch, 1)
+	profile.RuneFocusSelectionReadyAt = 0
 
 	CrystalCombat.resetState(profile, 1)
 	CrystalCombat.setFarmingActive(profile, false)
+	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.Ascension)
+	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.AscensionComplete, {
+		Ascensions = nextAscensions,
+		StarReward = starReward,
+	})
 	task.defer(teleportPlayerToZone, player, 1)
 
 	return {
 		Ok = true,
+		Changed = true,
+		Code = "ascension_complete",
 		Message = "Ascension complete. Your next run is stronger.",
-		Ascension = AscensionConfig.getSnapshot(profile),
+		Ascension = nextAscensions,
 		StarReward = starReward,
 	}
 end
 
-function PlayerStateService.buyRune(player, runeId)
+function PlayerStateService.buyAscensionUpgrade(player, upgradeId)
 	local profile = PlayerStateService.getProfile(player)
 
 	if profile == nil then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "profile_not_ready",
+			Message = "Player profile is not ready.",
+			IncludeSnapshot = true,
+		}
+	end
+
+	if
+		typeof(upgradeId) ~= "string"
+		or #upgradeId == 0
+		or #upgradeId > ProfileContract.MaximumIdentifierLength
+	then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "invalid_ascension_upgrade",
+			Message = "Choose a configured Ascension upgrade.",
+			IncludeSnapshot = true,
+		}
+	end
+
+	local upgrade = AscensionConfig.getUpgrade(upgradeId)
+
+	if upgrade == nil or table.find(AscensionConfig.UpgradeOrder, upgradeId) == nil then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "invalid_ascension_upgrade",
+			Message = "Choose a configured Ascension upgrade.",
+			IncludeSnapshot = true,
+		}
+	end
+
+	local upgrades = if typeof(profile.AscensionUpgrades) == "table" then profile.AscensionUpgrades else {}
+	local currentLevel = math.clamp(getNonNegativeInteger(upgrades[upgradeId]), 0, upgrade.MaxLevel)
+
+	if currentLevel >= upgrade.MaxLevel then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "ascension_upgrade_maxed",
+			Message = "That Ascension upgrade is already maxed.",
+			UpgradeId = upgradeId,
+			IncludeSnapshot = true,
+		}
+	end
+
+	local cost = AscensionConfig.getUpgradeCost(upgradeId, currentLevel)
+
+	if
+		typeof(cost) ~= "number"
+		or cost ~= cost
+		or math.abs(cost) == math.huge
+		or cost ~= math.floor(cost)
+		or cost < 1
+		or cost > ProfileContract.MaximumExactInteger
+	then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "ascension_upgrade_cost_unavailable",
+			Message = "That Ascension upgrade has no configured price.",
+			UpgradeId = upgradeId,
+			IncludeSnapshot = true,
+		}
+	end
+
+	local stars = getNonNegativeInteger(profile.AscensionStars)
+
+	if stars < cost then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "insufficient_ascension_stars",
+			Message = "Not enough Ascension Stars.",
+			UpgradeId = upgradeId,
+			Cost = cost,
+			IncludeSnapshot = true,
+		}
+	end
+
+	-- Cost, balance, and level commit together without yielding under the
+	-- PlayerStateService action lock.
+	profile.AscensionStars = stars - cost
+	upgrades[upgradeId] = currentLevel + 1
+	profile.AscensionUpgrades = upgrades
+	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.AscensionUpgrade, {
+		UpgradeId = upgradeId,
+		Level = currentLevel + 1,
+		StarsSpent = cost,
+	})
+
+	return {
+		Ok = true,
+		Changed = true,
+		Code = "ascension_upgrade_purchased",
+		Message = "Ascension upgrade purchased.",
+		UpgradeId = upgradeId,
+		Cost = cost,
+		IncludeSnapshot = true,
+	}
+end
+
+function PlayerStateService.setAutoCapacity(player, enabled)
+	local profile = PlayerStateService.getProfile(player)
+
+	if profile == nil then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "profile_not_ready",
 			Message = "Player profile is not ready.",
 		}
 	end
 
-	if typeof(runeId) ~= "string" then
+	if typeof(enabled) ~= "boolean" then
 		return {
 			Ok = false,
-			Message = "Invalid rune upgrade request.",
+			Changed = false,
+			Code = "invalid_auto_capacity_setting",
+			Message = "Auto Capacity requires a true or false setting.",
 		}
 	end
 
-	if not RuneConfig.canUseRunes(profile.UnlockedZones, profile.Rebirths) then
+	if getNonNegativeInteger(profile.Rebirths) < RitualStoneConfig.AutoCapacity.RequiredRebirths then
 		return {
 			Ok = false,
-			Message = "Runes unlock in Zone 3 after your first Rebirth.",
+			Changed = false,
+			Code = "auto_capacity_locked",
+			Message = "Auto Capacity unlocks after one Rebirth.",
 		}
 	end
 
-	local rune = RuneConfig.getRune(runeId)
+	local automation = if typeof(profile.Automation) == "table" then profile.Automation else {}
+	local wasEnabled = automation.AutoCapacityEnabled == true
 
-	if rune == nil then
+	if wasEnabled == enabled then
 		return {
-			Ok = false,
-			Message = "Rune is not configured.",
+			Ok = true,
+			Changed = false,
+			Code = "auto_capacity_unchanged",
+			Message = if enabled then "Auto Capacity is already enabled." else "Auto Capacity is already disabled.",
 		}
 	end
 
-	syncAndCollectCrystalReward(profile)
+	automation.Version = 1
+	automation.AutoCapacityEnabled = enabled
+	profile.Automation = automation
 
-	local level = profile.RuneLevels[runeId] or 0
-
-	if level >= rune.MaxLevel then
-		return {
-			Ok = false,
-			Message = "Rune is already maxed.",
+	local autoCapacityResult = if enabled
+		then RitualStoneProgress.purchaseAutoCapacity(profile)
+		else {
+			LevelsBought = 0,
+			EssenceSpent = 0,
 		}
-	end
-
-	local cost = RuneConfig.getUpgradeCost(runeId, level)
-
-	if profile.Essence < cost then
-		return {
-			Ok = false,
-			Message = "Not enough Ritual Essence.",
-		}
-	end
-
-	profile.Essence -= cost
-	profile.RuneLevels[runeId] = level + 1
-
-	local _, updatedStats = PlayerDerivedState.getCurrentRitualRuntime(profile)
-	collectCrystalRewardWithRush(profile, updatedStats)
 
 	return {
 		Ok = true,
-		Message = "Rune upgraded.",
+		Changed = true,
+		Code = if enabled then "auto_capacity_enabled" else "auto_capacity_disabled",
+		Message = if enabled then "Auto Capacity enabled." else "Auto Capacity disabled.",
+		LevelsBought = autoCapacityResult.LevelsBought or 0,
+		EssenceSpent = autoCapacityResult.EssenceSpent or 0,
 	}
+end
+
+function PlayerStateService.buyRune(_player, _runeId)
+	return {
+		Ok = false,
+		Changed = false,
+		Code = "deprecated_action",
+		Message = "Rune upgrades now charge automatically through Rune Focus.",
+	}
+end
+
+function PlayerStateService.selectRuneFocus(player, focusId)
+	local profile = PlayerStateService.getProfile(player)
+
+	if profile == nil then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "profile_not_ready",
+			Message = "Player profile is not ready.",
+		}
+	end
+
+	local result = RuneFocusProgress.selectFocus(profile, focusId, os.clock())
+
+	if result.Changed == true then
+		completeOnboardingMilestone(profile, "rune_focus_selected")
+	end
+
+	return result
 end
 
 function PlayerStateService.unlockZone(player, zoneId)
@@ -1597,6 +2209,7 @@ function PlayerStateService.unlockZone(player, zoneId)
 	if profile.UnlockedZones[zoneId] == true then
 		return {
 			Ok = true,
+			Changed = false,
 			Message = "Zone is already unlocked.",
 		}
 	end
@@ -1617,12 +2230,20 @@ function PlayerStateService.unlockZone(player, zoneId)
 		}
 	end
 
-	profile.Essence -= zone.UnlockCost
+	profile.Essence = getNonNegativeInteger(profile.Essence) - getNonNegativeInteger(zone.UnlockCost)
 	profile.UnlockedZones[zoneId] = true
+
+	if zoneId == 2 then
+		completeOnboardingMilestone(profile, "zone_2_unlocked")
+	elseif zoneId == 3 then
+		completeOnboardingMilestone(profile, "zone_3_unlocked")
+	end
+
 	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.UnlockZone)
 
 	return {
 		Ok = true,
+		Changed = true,
 		Message = "Zone unlocked.",
 		ZoneId = zoneId,
 	}
@@ -1657,6 +2278,7 @@ function PlayerStateService.selectZone(player, zoneId)
 	if currentPositionZoneId == zoneId and profile.CurrentZone == zoneId and profile.CrystalFarmingActive == true then
 		return {
 			Ok = true,
+			Changed = false,
 			Message = "Already in this zone.",
 			ZoneId = zoneId,
 		}
@@ -1676,6 +2298,7 @@ function PlayerStateService.selectZone(player, zoneId)
 
 	return {
 		Ok = true,
+		Changed = zoneResult.Changed == true,
 		Message = if didArriveInRequestedZone then "Travel complete." else "Travel requested.",
 		Reason = zoneResult.Reason,
 		ZoneId = zoneId,
@@ -1689,53 +2312,92 @@ function PlayerStateService.rollPet(player)
 	if profile == nil then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "profile_not_ready",
 			Message = "Player profile is not ready.",
 		}
 	end
 
 	local now = os.clock()
 
-	local _, stats = PlayerDerivedState.getCurrentRitualRuntime(profile)
-	local rollState = PlayerDerivedState.getRollState(profile, now)
+	local rollState = PlayerDerivedState.getRollCooldownState(profile, now)
 
 	if rollState.IsBusy then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "roll_in_progress",
 			Message = "Ritual is already opening.",
 			RetryAfter = rollState.RetryAfter,
 			Roll = rollState,
 		}
 	end
 
-	syncAndCollectCrystalReward(profile)
+	if #PetConfig.RollOrder == 0 then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "roll_table_empty",
+			Message = "No pets are configured for rolling.",
+		}
+	end
 
-	local activeBoosts = reconcileActiveBoosts(profile)
-	local rollLuckMultiplier = BoostConfig.getActiveBoostMultiplier(activeBoosts, BoostConfig.BoostIds.LuckMultiplier)
-	local rollLuck = stats.Luck * rollLuckMultiplier
+	local crystalChanged = syncAndCollectCrystalReward(profile)
+
+	reconcileActiveBoosts(profile)
+	local runeBonuses, stats = PlayerDerivedState.getCurrentRitualRuntime(profile)
+	rollState = PlayerDerivedState.getRollCooldownState(profile, now)
+	local rollLuck = PlayerDerivedState.getCurrentRollLuck(profile, stats)
+
+	if rollState.IsBusy then
+		return {
+			Ok = false,
+			Changed = crystalChanged == true,
+			Code = "roll_state_changed",
+			Message = "Ritual availability changed.",
+			RetryAfter = rollState.RetryAfter,
+			Roll = rollState,
+		}
+	end
+
 	local petId = PetConfig.roll(rollLuck, random)
 
 	if petId == nil then
 		return {
 			Ok = false,
+			Changed = crystalChanged == true,
+			Code = "roll_table_empty",
 			Message = "No pets are configured for rolling.",
 		}
 	end
 
 	profile.RollReadyAt = now + RitualStoneConfig.getRollOpeningCadence(stats.RollSpeedPercent)
-	profile.Rolls += 1
-	completeTutorialThroughStep(profile, TutorialConfig.StepIds.FirstRoll)
+	profile.Rolls = addExactIntegers(profile.Rolls, 1)
+	completeOnboardingMilestone(profile, "first_roll")
 
 	local petInstance = addPet(profile, petId)
 	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.RollPet)
+	local petFacts = PlayerDerivedState.getPetSnapshotFacts(
+		petId,
+		rollLuck,
+		runeBonuses.PetPowerMultiplier
+	)
+	local petResult = {
+		PetId = petInstance.PetId,
+		Count = petInstance.Count,
+	}
+
+	for key, value in pairs(petFacts) do
+		petResult[key] = value
+	end
 
 	return {
 		Ok = true,
+		Changed = true,
+		Code = "pet_rolled",
 		Message = "Ritual complete.",
-		Pet = {
-			PetId = petInstance.PetId,
-			Count = petInstance.Count,
-		},
-		Roll = PlayerDerivedState.getRollState(profile, now),
+		Pet = petResult,
+		Roll = PlayerDerivedState.getRollCooldownState(profile, now),
 	}
 end
 
@@ -1745,87 +2407,255 @@ function PlayerStateService.buyStoneUpgrade(player, upgradeId)
 	if profile == nil then
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "profile_not_ready",
 			Message = "Player profile is not ready.",
 		}
 	end
 
-	if RitualStoneConfig.Upgrades[upgradeId] == nil then
-		return {
-			Ok = false,
-			Message = "Unknown stone upgrade.",
-		}
+	local initialInspection = RitualStoneProgress.inspectPurchase(profile, upgradeId)
+
+	if initialInspection.Ok ~= true then
+		return initialInspection
 	end
 
-	local currentLevel = profile.StoneLevels[upgradeId] or 0
-	local cost = RitualStoneConfig.getUpgradeCost(upgradeId, currentLevel)
+	local crystalChanged = syncAndCollectCrystalReward(profile)
+	local result = RitualStoneProgress.purchase(profile, upgradeId)
 
-	syncAndCollectCrystalReward(profile)
+	if result.Ok ~= true then
+		result.Changed = crystalChanged == true
 
-	if profile.Essence < cost then
-		return {
-			Ok = false,
-			Message = "Not enough Ritual Essence.",
-		}
+		return result
 	end
 
-	profile.Essence -= cost
-	profile.StoneLevels[upgradeId] = currentLevel + 1
-	completeTutorialThroughStep(profile, TutorialConfig.StepIds.FirstStoneUpgrade)
-	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.BuyStoneUpgrade)
+	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.StoneUpgrade, {
+		UpgradeId = result.UpgradeId,
+		LevelsBought = result.LevelsBought,
+		Level = result.Level,
+		EssenceSpent = result.EssenceSpent,
+	})
 
 	local _, updatedStats = PlayerDerivedState.getCurrentRitualRuntime(profile)
 	collectCrystalRewardWithRush(profile, updatedStats)
 
-	return {
-		Ok = true,
-		Message = "Ritual Stone upgraded.",
-		UpgradeId = upgradeId,
-	}
+	return result
 end
 
-local function handleProfileSessionEnded(player)
-	profilesByPlayer[player] = nil
+local function clearProfileLoadToken(player, loadToken)
+	if profileLoadTokensByPlayer[player] ~= loadToken then
+		return false
+	end
+
+	profileLoadTokensByPlayer[player] = nil
+
+	return true
+end
+
+local function handleProfileSessionEnded(player, endedProfile, endedToken)
+	local record = getProfileRecord(player)
+
+	if record == nil or record.Profile ~= endedProfile or record.Token ~= endedToken then
+		return
+	end
+
+	profileRecordsByPlayer[player] = nil
 
 	if player.Parent == Players then
 		player:Kick("Your data session ended. Please rejoin.")
 	end
 end
 
-local function loadProfileForPlayer(player)
-	local profile = ProfilePersistence.startSession(player, handleProfileSessionEnded)
+local function rejectLoadedProfile(player, profile, sessionToken, loadToken, shouldKick)
+	local record = getProfileRecord(player)
 
-	if player.Parent ~= Players then
-		ProfilePersistence.releaseSession(player)
+	if record ~= nil and record.Profile == profile and record.Token == sessionToken then
+		profileRecordsByPlayer[player] = nil
+	end
+
+	local ownedLoad = clearProfileLoadToken(player, loadToken)
+	ProfilePersistence.releaseSession(player, profile, sessionToken)
+
+	if shouldKick and ownedLoad and player.Parent == Players then
+		player:Kick("Could not load your data safely. Please rejoin.")
+	end
+end
+
+local function loadProfileForPlayer(player, loadToken, loadContext)
+	if profileLoadTokensByPlayer[player] ~= loadToken or player.Parent ~= Players then
 		return
 	end
+
+	local profile, sessionToken, loadReason = ProfilePersistence.startSession(player, handleProfileSessionEnded)
 
 	if profile == nil then
-		player:Kick("Could not load your data. Please rejoin.")
+		local ownedLoad = clearProfileLoadToken(player, loadToken)
+
+		if ownedLoad and player.Parent == Players then
+			warn("[PlayerStateService] Profile load failed:", loadReason)
+			player:Kick("Could not load your data. Please rejoin.")
+		end
+
 		return
 	end
 
-	reconcilePetIds(profile)
-	backfillTutorialProgress(profile)
-	CrystalCombat.ensureState(profile)
-	CrystalCombat.clearRuntime(profile)
-	commitProgressRecords(profile)
-	ProfilePersistence.sync(player, profile)
+	loadContext.Profile = profile
+	loadContext.SessionToken = sessionToken
 
-	profilesByPlayer[player] = profile
-	PlayerStateService.updateLeaderstatsFromProfile(player)
-	PlayerStateService.publishPublicVisual(player)
-	teleportPlayerToZone(player, profile.CurrentZone)
+	if
+		profileLoadTokensByPlayer[player] ~= loadToken
+		or player.Parent ~= Players
+		or not ProfilePersistence.isCurrent(player, profile, sessionToken)
+	then
+		rejectLoadedProfile(player, profile, sessionToken, loadToken, true)
+		return
+	end
+
+	local initialized, initializationError = pcall(function()
+		reconcilePetIds(profile)
+		CrystalCombat.ensureState(profile)
+		CrystalCombat.clearRuntime(profile)
+		commitProgressRecords(profile)
+
+		if not ProfilePersistence.sync(player, profile) then
+			error("profile session ended during initialization")
+		end
+	end)
+
+	if not initialized then
+		warn("[PlayerStateService] Profile initialization failed:", initializationError)
+		rejectLoadedProfile(player, profile, sessionToken, loadToken, true)
+		return
+	end
+
+	if
+		profileLoadTokensByPlayer[player] ~= loadToken
+		or player.Parent ~= Players
+		or getProfileRecord(player) ~= nil
+		or not ProfilePersistence.isCurrent(player, profile, sessionToken)
+	then
+		rejectLoadedProfile(player, profile, sessionToken, loadToken, true)
+		return
+	end
+
+	local record = {
+		Profile = profile,
+		Token = sessionToken,
+	}
+
+	profileRecordsByPlayer[player] = record
+	clearProfileLoadToken(player, loadToken)
+
+	local published, publicationError = pcall(function()
+		if not PlayerStateService.isCurrentProfile(player, profile) then
+			error("profile session ended before publication")
+		end
+
+		PlayerStateService.updateLeaderstatsFromProfile(player, profile)
+		PlayerStateService.publishPublicVisual(player, profile)
+		teleportPlayerToZone(player, profile.CurrentZone)
+	end)
+
+	if not published then
+		warn("[PlayerStateService] Profile publication failed:", publicationError)
+
+		if getProfileRecord(player) == record then
+			profileRecordsByPlayer[player] = nil
+		end
+
+		ProfilePersistence.releaseSession(player, profile, sessionToken)
+
+		if player.Parent == Players then
+			player:Kick("Could not initialize your player data. Please rejoin.")
+		end
+	end
+end
+
+local function queueProfileLoad(player)
+	if
+		player == nil
+		or player.Parent ~= Players
+		or getProfileRecord(player) ~= nil
+		or profileLoadTokensByPlayer[player] ~= nil
+	then
+		return false
+	end
+
+	nextProfileLoadToken += 1
+	local loadToken = nextProfileLoadToken
+	local loadContext = {}
+	profileLoadTokensByPlayer[player] = loadToken
+	task.spawn(function()
+		local completed, loadError = pcall(loadProfileForPlayer, player, loadToken, loadContext)
+
+		if completed then
+			return
+		end
+
+		local profile = loadContext.Profile
+		local sessionToken = loadContext.SessionToken
+		local record = getProfileRecord(player)
+		local ownedRecord = profile ~= nil
+			and record ~= nil
+			and record.Profile == profile
+			and record.Token == sessionToken
+		local ownedLoad = clearProfileLoadToken(player, loadToken)
+		local ownedSession = profile ~= nil
+			and sessionToken ~= nil
+			and ProfilePersistence.isCurrent(player, profile, sessionToken)
+
+		if ownedRecord then
+			profileRecordsByPlayer[player] = nil
+		end
+
+		if profile ~= nil and sessionToken ~= nil then
+			local releaseCallSucceeded, released = pcall(
+				ProfilePersistence.releaseSession,
+				player,
+				profile,
+				sessionToken
+			)
+
+			if not releaseCallSucceeded or (ownedSession and released ~= true) then
+				warn("[PlayerStateService] Failed to finalize an interrupted profile load")
+			end
+		end
+
+		warn("[PlayerStateService] Unexpected profile load failure:", loadError)
+
+		if (ownedLoad or ownedRecord or ownedSession) and player.Parent == Players then
+			player:Kick("Could not initialize your player data. Please rejoin.")
+		end
+	end)
+
+	return true
 end
 
 local function releaseProfileForPlayer(player)
-	local profile = profilesByPlayer[player]
+	profileLoadTokensByPlayer[player] = nil
 
-	if profile ~= nil then
-		commitProfileForPersistence(profile)
+	local record = getProfileRecord(player)
+
+	if record == nil then
+		return false
 	end
 
-	profilesByPlayer[player] = nil
-	ProfilePersistence.releaseSession(player, profile)
+	local profile = record.Profile
+	local committed, commitError = pcall(commitProfileForPersistence, profile)
+
+	local released = ProfilePersistence.releaseSession(player, profile, record.Token)
+
+	if
+		getProfileRecord(player) == record
+		and (released or not ProfilePersistence.isCurrent(player, profile, record.Token))
+	then
+		profileRecordsByPlayer[player] = nil
+	end
+
+	if not committed then
+		warn("[PlayerStateService] Final profile reconciliation failed:", commitError)
+	end
+
+	return released
 end
 
 function PlayerStateService.start()
@@ -1836,35 +2666,39 @@ function PlayerStateService.start()
 	hasStarted = true
 
 	Players.PlayerAdded:Connect(function(player)
-		task.spawn(loadProfileForPlayer, player)
+		queueProfileLoad(player)
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
-		local ok, err = pcall(PlayerStateService.withProfileLock, player, function()
-			releaseProfileForPlayer(player)
+		local callSucceeded, releasedOrError = pcall(PlayerStateService.withProfileLock, player, function()
+			return releaseProfileForPlayer(player)
 		end)
 
-		if not ok then
-			warn("[PlayerStateService] Failed to release profile:", err)
+		if not callSucceeded then
+			warn("[PlayerStateService] Failed to release profile:", releasedOrError)
+		elseif releasedOrError ~= true then
+			warn("[PlayerStateService] Exact profile session was not released")
 		end
 	end)
 
 	for _, player in ipairs(Players:GetPlayers()) do
-		task.spawn(loadProfileForPlayer, player)
+		queueProfileLoad(player)
 	end
 
 	task.spawn(function()
 		while hasStarted do
-			task.wait(AUTOSAVE_SECONDS)
+			task.wait(PROFILE_SYNC_SECONDS)
 
-			for player in pairs(profilesByPlayer) do
-				local ok, err = pcall(PlayerStateService.withProfileLock, player, function()
-					PlayerStateService.savePlayer(player)
+			for player, record in pairs(profileRecordsByPlayer) do
+				local profile = record.Profile
+
+				task.spawn(function()
+					local ok, synchronized = pcall(PlayerStateService.syncProfile, player, profile)
+
+					if not ok or synchronized ~= true then
+						warn("[PlayerStateService] Periodic profile synchronization failed")
+					end
 				end)
-
-				if not ok then
-					warn("[PlayerStateService] Autosave failed:", err)
-				end
 			end
 		end
 	end)

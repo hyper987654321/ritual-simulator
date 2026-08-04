@@ -60,6 +60,18 @@ local actionHandlers = {
 		return PlayerStateService.ascend(player)
 	end,
 
+	[Network.Actions.SelectRuneFocus] = function(player, payload)
+		return PlayerStateService.selectRuneFocus(player, getPayloadValue(payload, "FocusId"))
+	end,
+
+	[Network.Actions.BuyAscensionUpgrade] = function(player, payload)
+		return PlayerStateService.buyAscensionUpgrade(player, getPayloadValue(payload, "UpgradeId"))
+	end,
+
+	[Network.Actions.SetAutoCapacity] = function(player, payload)
+		return PlayerStateService.setAutoCapacity(player, getPayloadValue(payload, "Enabled"))
+	end,
+
 	[Network.Actions.BuyRune] = function(player, payload)
 		return PlayerStateService.buyRune(player, getPayloadValue(payload, "RuneId"))
 	end,
@@ -73,7 +85,11 @@ local actionHandlers = {
 	end,
 
 	[Network.Actions.ClaimRitualRushReward] = function(player, payload)
-		return PlayerStateService.claimRitualRushReward(player, getPayloadValue(payload, "MilestoneId"))
+		return PlayerStateService.claimRitualRushReward(
+			player,
+			getPayloadValue(payload, "MilestoneId"),
+			getPayloadValue(payload, "Track")
+		)
 	end,
 
 	[Network.Actions.ClaimRitualRushFreeReward] = function(player, payload)
@@ -143,19 +159,31 @@ local function getRateLimitedResponse(player, bucketName, config)
 
 	return {
 		Ok = false,
+		Changed = false,
+		Code = "rate_limited",
 		Message = "Slow down.",
 		RetryAfter = retryAfter,
 	}
 end
 
-local function shouldAttachSnapshot(actionName, result)
-	if result.Ok ~= false then
-		return true
+local function normalizeActionResult(result)
+	local response = if typeof(result) == "table" then result else {}
+
+	response.Ok = response.Ok == true
+	response.Changed = response.Changed == true
+
+	if
+		typeof(response.Code) ~= "string"
+		or string.match(response.Code, "^[a-z][a-z0-9_]*$") == nil
+	then
+		if response.Ok then
+			response.Code = if response.Changed then "ok" else "no_change"
+		else
+			response.Code = "action_failed"
+		end
 	end
 
-	-- Some failed gameplay actions can collect pending crystal rewards before failing.
-	-- Only skip snapshots for no-state rejections this boundary can identify.
-	return not (actionName == Network.Actions.RollPet and typeof(result.Roll) == "table")
+	return response
 end
 
 local function processAction(player, actionName, payload)
@@ -168,6 +196,8 @@ local function processAction(player, actionName, payload)
 
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "invalid_action_request",
 			Message = "Invalid action request.",
 		}
 	end
@@ -183,6 +213,8 @@ local function processAction(player, actionName, payload)
 
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "unknown_action",
 			Message = "Unknown action request.",
 		}
 	end
@@ -194,20 +226,18 @@ local function processAction(player, actionName, payload)
 	end
 
 	return PlayerStateService.withProfileLock(player, function()
-		local result = handler(player, payload)
+		local result = normalizeActionResult(handler(player, payload))
 
-		if typeof(result) ~= "table" then
-			return {
+		if result.Code == "action_failed" and result.Message == nil then
+			result = normalizeActionResult({
 				Ok = false,
+				Changed = false,
+				Code = "action_failed",
 				Message = "Action failed.",
-			}
+			})
 		end
 
-		if not shouldAttachSnapshot(actionName, result) then
-			return result
-		end
-
-		return SnapshotPublisher.attach(player, result)
+		return normalizeActionResult(SnapshotPublisher.attach(player, result))
 	end)
 end
 
@@ -219,6 +249,8 @@ local function invokeAction(player, actionName, payload)
 
 		return {
 			Ok = false,
+			Changed = false,
+			Code = "internal_error",
 			Message = "Action failed.",
 		}
 	end

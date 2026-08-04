@@ -201,10 +201,15 @@ local function createPanel(position, size, children)
 end
 
 local function RebirthButton(props)
-	local canRebirth = props.CanRebirth == true
+	local hasPendingAwayClaim = props.HasPendingAwayClaim == true
+	local canRebirth = props.CanRebirth == true and not hasPendingAwayClaim
 	local onRebirth = props.OnRebirth
 	local isActionable = canRebirth and onRebirth ~= nil
-	local buttonText = if canRebirth then "Rebirth" else "Requirements Needed"
+	local buttonText = if hasPendingAwayClaim
+		then "Claim Away Reward First"
+		elseif canRebirth
+		then "Rebirth"
+		else "Requirements Needed"
 	local gradient = if canRebirth then BUTTON_GRADIENT else BUTTON_LOCKED_GRADIENT
 
 	return AnimatedScaleButton.create({
@@ -213,13 +218,13 @@ local function RebirthButton(props)
 		HoverTweenInfo = BUTTON_HOVER_TWEEN_INFO,
 		RestTweenInfo = BUTTON_REST_TWEEN_INFO,
 		ButtonProps = {
-			Active = true,
+			Active = isActionable,
 			AutoButtonColor = false,
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			Font = UIThemeConfig.Font,
-			Position = UDim2.fromOffset(215, 367),
+			Position = UDim2.fromOffset(215, if hasPendingAwayClaim then 402 else 386),
 			Size = UDim2.fromOffset(322, 42),
 			Text = "",
 			ZIndex = 96,
@@ -257,9 +262,10 @@ local function RebirthButton(props)
 	})
 end
 
-local function createRebirthButton(canRebirth, onRebirth)
+local function createRebirthButton(canRebirth, hasPendingAwayClaim, onRebirth)
 	return React.createElement(RebirthButton, {
 		CanRebirth = canRebirth,
+		HasPendingAwayClaim = hasPendingAwayClaim,
 		OnRebirth = onRebirth,
 	})
 end
@@ -272,15 +278,44 @@ function RebirthOverlay.create(props)
 		return nil
 	end
 
-	local rebirths = snapshot.Rebirths or 0
-	local stats = snapshot.StoneStats or RitualStoneConfig.BaseStats
-	local requirement = snapshot.RebirthRequirement or RitualStoneConfig.getRebirthRequirement(rebirths)
-	local currentMultiplier = stats.RebirthMultiplier or (1 + rebirths * RitualStoneConfig.Rebirth.MultiplierPerRebirth)
-	local nextMultiplier = 1 + (rebirths + 1) * RitualStoneConfig.Rebirth.MultiplierPerRebirth
-	local powerIncreaseText = "+" .. NumberFormatter.compact(RitualStoneConfig.Rebirth.MultiplierPerRebirth * 100) .. "%"
+	local canonicalRebirth = if typeof(snapshot.Rebirth) == "table" then snapshot.Rebirth else nil
+	local rebirths = if canonicalRebirth ~= nil then canonicalRebirth.Count or 0 else snapshot.Rebirths or 0
+	local requirement = canonicalRebirth or snapshot.RebirthRequirement or RitualStoneConfig.getRebirthRequirement(rebirths)
+	local essenceIncreaseText = "+" .. NumberFormatter.compact(RitualStoneConfig.Rebirth.MultiplierPerRebirth * 100) .. "%"
+	local petPowerIncreaseText = "+"
+		.. NumberFormatter.decimal(RitualStoneConfig.Rebirth.PetPowerMultiplierPerRebirth * 100, 1)
+		.. "%"
 	local luckIncreaseText = "+" .. NumberFormatter.decimal(RitualStoneConfig.Rebirth.LuckPerRebirth, 2)
-	local essenceMet = (snapshot.Essence or 0) >= requirement.RequiredEssence
-	local canRebirth = requirement.CanRebirth == true
+	local currentRuneChargeBonus = math.min(
+		RitualStoneConfig.Rebirth.MaximumRuneChargeMultiplierBonus,
+		rebirths * RitualStoneConfig.Rebirth.RuneChargeMultiplierPerRebirth
+	)
+	local nextRuneChargeBonus = math.min(
+		RitualStoneConfig.Rebirth.MaximumRuneChargeMultiplierBonus,
+		(rebirths + 1) * RitualStoneConfig.Rebirth.RuneChargeMultiplierPerRebirth
+	)
+	local runeChargeDelta = math.max(0, nextRuneChargeBonus - currentRuneChargeBonus)
+	local runeChargeIncreaseText = if runeChargeDelta > 0
+		then "+" .. NumberFormatter.decimal(runeChargeDelta * 100, 1) .. "%"
+		else "Cap reached"
+	local requiredEssence = requirement.RequiredEssence or 0
+	local requiredZone = requirement.RequiredZone or 1
+	local essenceMet = if typeof(requirement.HasRequiredEssence) == "boolean"
+		then requirement.HasRequiredEssence
+		else (snapshot.Essence or 0) >= requiredEssence
+	local zoneMet = requirement.HasRequiredZone == true
+
+	if canonicalRebirth == nil and typeof(snapshot.Zones) == "table" then
+		for _, zone in ipairs(snapshot.Zones) do
+			if zone.ZoneId == requiredZone then
+				zoneMet = zone.IsUnlocked == true
+				break
+			end
+		end
+	end
+
+	local hasPendingAwayClaim = requirement.HasPendingAwayClaim == true
+	local canRebirth = requirement.CanRebirth == true and not hasPendingAwayClaim
 
 	return GameOverlay.create({
 		BackgroundId = "Rebirth",
@@ -306,31 +341,39 @@ function RebirthOverlay.create(props)
 				ZIndex = 96,
 			}),
 
-			BenefitTitle = createSectionTitle("Increase Stats By", 58),
-			BenefitDivider = createDivider(90),
-			Benefits = createPanel(UDim2.fromOffset(34, 102), UDim2.fromOffset(362, 104), {
-				Power = createBenefitRow("Power", powerIncreaseText, POWER_COLOR, 1),
-				Luck = createBenefitRow("Luck", luckIncreaseText, LUCK_COLOR, 2),
-				Gain = createBenefitRow(
-					"Gain",
-					"x" .. NumberFormatter.decimal(currentMultiplier, 2) .. " > x" .. NumberFormatter.decimal(nextMultiplier, 2),
-					ACCENT_COLOR,
-					3
-				),
+			BenefitTitle = createSectionTitle("Permanent Bonuses", 50),
+			BenefitDivider = createDivider(82),
+			Benefits = createPanel(UDim2.fromOffset(34, 92), UDim2.fromOffset(362, 126), {
+				Essence = createBenefitRow("Essence Gain", essenceIncreaseText, ACCENT_COLOR, 1),
+				PetPower = createBenefitRow("Pet Power", petPowerIncreaseText, POWER_COLOR, 2),
+				Luck = createBenefitRow("Luck", luckIncreaseText, LUCK_COLOR, 3),
+				RuneCharge = createBenefitRow("Rune Charge", runeChargeIncreaseText, Color3.fromRGB(255, 155, 48), 4),
 			}),
 
-			RequirementsTitle = createSectionTitle("Requirement", 226),
-			RequirementsDivider = createDivider(258),
-			Requirements = createPanel(UDim2.fromOffset(34, 270), UDim2.fromOffset(362, 48), {
+			RequirementsTitle = createSectionTitle("Requirements", 224),
+			RequirementsDivider = createDivider(256),
+			Requirements = createPanel(
+				UDim2.fromOffset(34, 266),
+				UDim2.fromOffset(362, if hasPendingAwayClaim then 106 else 76),
+				{
 				Essence = createRequirementRow(
 					"Essence",
-					NumberFormatter.compact(snapshot.Essence or 0) .. " / " .. NumberFormatter.compact(requirement.RequiredEssence),
+					NumberFormatter.compact(snapshot.Essence or 0) .. " / " .. NumberFormatter.compact(requiredEssence),
 					essenceMet,
 					1
 				),
+				Zone = createRequirementRow(
+					"Zone",
+					if zoneMet then "Zone " .. tostring(requiredZone) .. " unlocked" else "Unlock Zone " .. tostring(requiredZone),
+					zoneMet,
+					2
+				),
+				AwayReward = if hasPendingAwayClaim
+					then createRequirementRow("Away reward", "Claim or dismiss first", false, 3)
+					else nil,
 			}),
 
-			Action = createRebirthButton(canRebirth, resolvedProps.OnRebirth),
+			Action = createRebirthButton(canRebirth, hasPendingAwayClaim, resolvedProps.OnRebirth),
 		},
 	})
 end

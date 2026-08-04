@@ -19,7 +19,11 @@ function RitualStoneVisualConfig.getVisualState(snapshot)
 	local capacity = math.max(0, stats.Capacity or RitualStoneConfig.BaseStats.Capacity)
 	local essence = (snapshot and snapshot.Essence) or 0
 	local fillRatio = if capacity > 0 then math.clamp(essence / capacity, 0, 1) else 0
-	local tier = RitualStoneVisualConfig.getTier((snapshot and snapshot.Rebirths) or 0)
+	local rebirth = if snapshot ~= nil and typeof(snapshot.Rebirth) == "table" then snapshot.Rebirth else nil
+	local rebirthCount = if rebirth ~= nil and typeof(rebirth.Count) == "number"
+		then rebirth.Count
+		else (snapshot and snapshot.Rebirths) or 0
+	local tier = RitualStoneVisualConfig.getTier(rebirthCount)
 	local coreScale = 1.05 + fillRatio * 0.55 + tier * 0.05
 	local bodyScale = 1 + tier * 0.08
 

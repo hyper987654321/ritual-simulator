@@ -1002,7 +1002,7 @@ export type VersionQuery<T> = {
 
 type ProfileStoreStandard<T> = {
 	Name: string,
-	StartSessionAsync: (self: any, profile_key: string, params: {Steal: boolean?}) -> (Profile<T>?),
+	StartSessionAsync: (self: any, profile_key: string, params: {Steal: boolean?, Cancel: (() -> boolean)?}?) -> (Profile<T>?),
 	MessageAsync: (self: any, profile_key: string, message: JSONAcceptable) -> (boolean),
 	GetAsync: (self: any, profile_key: string, version: string?) -> (Profile<T>?),
 	VersionQuery: (self: any, profile_key: string, sort_direction: Enum.SortDirection?, min_date: DateTime | number | nil, max_date: DateTime | number | nil) -> (VersionQuery<T>),
@@ -1270,9 +1270,9 @@ function ProfileStore.New(store_name, template)
 
 			Name = store_name,
 
-			StartSessionAsync = function(_, profile_key)
+			StartSessionAsync = function(_, profile_key, params)
 				MockFlag = true
-				return self:StartSessionAsync(profile_key)
+				return self:StartSessionAsync(profile_key, params)
 			end,
 			MessageAsync = function(_, profile_key, message)
 				MockFlag = true

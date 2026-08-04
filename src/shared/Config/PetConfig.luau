@@ -1,3 +1,8 @@
+local MAXIMUM_PET_DAMAGE = 9_007_199_254_740_991
+local ROLL_DISTRIBUTION_CACHE_CAPACITY = 128
+local LUCK_QUALITY_MAXIMUM = 0.35
+local LUCK_QUALITY_FALLOFF = 18
+
 local PetConfig = {}
 
 local Util = script.Parent.Parent:WaitForChild("Util")
@@ -6,6 +11,10 @@ local NumberFormatter = require(Util:WaitForChild("NumberFormatter"))
 PetConfig.MAX_EQUIPPED = 3
 PetConfig.RollDisplayName = "All Pets"
 PetConfig.BaseAttackInterval = 2
+PetConfig.MaximumPetDamage = MAXIMUM_PET_DAMAGE
+PetConfig.RollDistributionCacheCapacity = ROLL_DISTRIBUTION_CACHE_CAPACITY
+PetConfig.LuckQualityMaximum = LUCK_QUALITY_MAXIMUM
+PetConfig.LuckQualityFalloff = LUCK_QUALITY_FALLOFF
 
 PetConfig.RarityColors = {
 	Common = Color3.fromRGB(120, 120, 130),
@@ -19,49 +28,49 @@ PetConfig.BasePets = {
 		DisplayName = "Ember Sprite",
 		Rarity = "Common",
 		RollChance = 0.22,
-		Damage = 2,
+		Damage = 3,
 		Color = Color3.fromRGB(255, 137, 74),
 	},
 	sun_sprite = {
 		DisplayName = "Sun Sprite",
 		Rarity = "Common",
 		RollChance = 0.16,
-		Damage = 4,
+		Damage = 5,
 		Color = Color3.fromRGB(255, 225, 92),
 	},
 	moon_sprite = {
 		DisplayName = "Moon Sprite",
 		Rarity = "Common",
 		RollChance = 0.12,
-		Damage = 6,
+		Damage = 8,
 		Color = Color3.fromRGB(143, 221, 255),
 	},
 	crystal_sprite = {
 		DisplayName = "Crystal Sprite",
 		Rarity = "Rare",
 		RollChance = 0.055,
-		Damage = 15,
+		Damage = 14,
 		Color = Color3.fromRGB(119, 217, 255),
 	},
 	crescent_sprite = {
 		DisplayName = "Crescent Sprite",
 		Rarity = "Rare",
 		RollChance = 0.04,
-		Damage = 20,
+		Damage = 22,
 		Color = Color3.fromRGB(101, 153, 255),
 	},
 	rune_stone = {
 		DisplayName = "Rune Stone",
 		Rarity = "Rare",
 		RollChance = 0.019,
-		Damage = 44,
+		Damage = 38,
 		Color = Color3.fromRGB(116, 169, 210),
 	},
 	crimson_glyph = {
 		DisplayName = "Crimson Glyph",
 		Rarity = "Mythic",
 		RollChance = 0.0004,
-		Damage = 560,
+		Damage = 110,
 		Color = Color3.fromRGB(255, 83, 160),
 	},
 }
@@ -157,21 +166,24 @@ PetConfig.VariantOrder = PetConfig.AuraRarityOrder
 PetConfig.Sizes = {
 	normal = {
 		DisplayName = "",
-		ChanceDivisor = 1,
+		Chance = 0.57,
+		ChanceDivisor = 1 / 0.57,
 		DamageMultiplier = 1,
 		Scale = 1,
 	},
 	big = {
 		DisplayName = "Big",
-		ChanceDivisor = 1.5,
-		DamageMultiplier = 1.5,
+		Chance = 0.28,
+		ChanceDivisor = 1 / 0.28,
+		DamageMultiplier = 1.35,
 		Scale = 1.35,
 		Color = Color3.fromRGB(73, 207, 255),
 	},
 	huge = {
 		DisplayName = "Huge",
-		ChanceDivisor = 2,
-		DamageMultiplier = 2,
+		Chance = 0.15,
+		ChanceDivisor = 1 / 0.15,
+		DamageMultiplier = 1.75,
 		Scale = 1.8,
 		Color = Color3.fromRGB(255, 92, 194),
 	},
@@ -185,16 +197,18 @@ PetConfig.SizeOrder = {
 
 local finalPetPartsById = {}
 local finalPetCache = {}
+local rollDistributionCache = {}
+local rollDistributionCacheCount = 0
 local totalBaseChance = 0
 local totalAuraChance = 0
-local totalSizeWeight = 0
-
-local function getWeight(config)
-	return 1 / math.max(0.000001, config.ChanceDivisor or 1)
-end
+local totalSizeChance = 0
 
 local function getChance(config)
 	return math.max(0, config.Chance or 0)
+end
+
+local function isFiniteNumber(value)
+	return typeof(value) == "number" and value == value and math.abs(value) ~= math.huge
 end
 
 local function getDisplayName(parts)
@@ -254,15 +268,31 @@ local function getLegacyComposedPetId(basePetId, legacyAuraRarityId, sizeId)
 end
 
 local function getSafeLuck(luck)
-	if typeof(luck) ~= "number" or luck ~= luck then
+	if not isFiniteNumber(luck) then
 		return 1
 	end
 
 	return math.max(1, luck)
 end
 
+local function getLuckBucket(luck)
+	local safeLuck = getSafeLuck(luck)
+	local scaledLuck = safeLuck * 10
+
+	if not isFiniteNumber(scaledLuck) then
+		-- At this magnitude, adjacent finite doubles are already much farther apart than 0.1.
+		return safeLuck
+	end
+
+	return math.floor(scaledLuck + 0.5) / 10
+end
+
 function PetConfig.getFinalPetId(basePetId, auraRarityId, sizeId)
 	return getComposedPetId(basePetId, getResolvedAuraRarityId(auraRarityId), sizeId or "normal")
+end
+
+function PetConfig.getLuckBucket(luck)
+	return getLuckBucket(luck)
 end
 
 for _, basePetId in ipairs(PetConfig.BaseRollOrder) do
@@ -285,7 +315,7 @@ for _, sizeId in ipairs(PetConfig.SizeOrder) do
 	local size = PetConfig.Sizes[sizeId]
 
 	if size ~= nil then
-		totalSizeWeight += getWeight(size)
+		totalSizeChance += getChance(size)
 	end
 end
 
@@ -383,7 +413,7 @@ function PetConfig.getPetChance(petId)
 
 	local baseChance = math.max(0, basePet.RollChance or 0) / totalBaseChance
 	local auraChance = getChance(auraRarity) / math.max(totalAuraChance, 0.000001)
-	local sizeChance = getWeight(size) / math.max(totalSizeWeight, 0.000001)
+	local sizeChance = getChance(size) / math.max(totalSizeChance, 0.000001)
 
 	return baseChance * auraChance * sizeChance
 end
@@ -421,7 +451,10 @@ function PetConfig.getPet(petId)
 
 	table.insert(nameParts, basePet.DisplayName)
 
-	local damage = math.max(1, math.floor((basePet.Damage or 0) * (auraRarity.DamageMultiplier or 1) * (size.DamageMultiplier or 1) + 0.5))
+	local damage = math.max(
+		1,
+		math.floor((basePet.Damage or 0) * (auraRarity.DamageMultiplier or 1) * (size.DamageMultiplier or 1) + 0.5)
+	)
 	local auraRarityId = parts.AuraRarityId or parts.VariantId
 	local finalPet = {
 		PetId = petId,
@@ -445,7 +478,7 @@ function PetConfig.getPet(petId)
 		AuraColor = auraRarity.UiColor or basePet.Color,
 		AuraAccentColor = auraRarity.AccentColor,
 		Scale = size.Scale or 1,
-		ChanceDivisor = (1 / math.max(getChance(auraRarity), 0.000001)) * (size.ChanceDivisor or 1),
+		ChanceDivisor = 1 / math.max(getChance(auraRarity) * getChance(size), 0.000001),
 	}
 
 	finalPetCache[petId] = finalPet
@@ -470,7 +503,16 @@ function PetConfig.getPetDamage(petId, damageMultiplier)
 		return 0
 	end
 
-	return pet.Damage * (damageMultiplier or 1)
+	local safeMultiplier = 1
+
+	if damageMultiplier ~= nil and isFiniteNumber(damageMultiplier) then
+		safeMultiplier = math.max(0, damageMultiplier)
+	end
+
+	local baseDamage = if isFiniteNumber(pet.Damage) then math.max(0, pet.Damage) else 0
+	local boundedMultiplier = math.min(safeMultiplier, MAXIMUM_PET_DAMAGE / math.max(1, baseDamage))
+
+	return math.min(MAXIMUM_PET_DAMAGE, baseDamage * boundedMultiplier)
 end
 
 function PetConfig.getPetRevealDisplayName(petId)
@@ -502,11 +544,11 @@ function PetConfig.getRarityScore(petId)
 end
 
 function PetConfig.getChanceOddsText(chance)
-	if typeof(chance) ~= "number" or chance <= 0 then
+	if not isFiniteNumber(chance) or chance <= 0 then
 		return "0%"
 	end
 
-	local denominator = 1 / chance
+	local denominator = 1 / math.min(1, chance)
 
 	return "1/" .. NumberFormatter.compactLower(denominator)
 end
@@ -528,99 +570,182 @@ function PetConfig.getRollEntries()
 	return entries
 end
 
-function PetConfig.getRollPreview()
-	local entries = PetConfig.getRollEntries()
-	local preview = {
-		DisplayName = PetConfig.RollDisplayName,
+local function getQualityPower(luckBucket)
+	return LUCK_QUALITY_MAXIMUM * (1 - math.exp(-(math.max(1, luckBucket) - 1) / LUCK_QUALITY_FALLOFF))
+end
+
+local function createRollDistribution(luckBucket)
+	local qualityPower = getQualityPower(luckBucket)
+	local entries = {}
+	local totalAdjustedWeight = 0
+
+	for _, petId in ipairs(PetConfig.RollOrder) do
+		local baseFinalChance = PetConfig.getPetChance(petId)
+		local adjustedWeight = if baseFinalChance > 0 then baseFinalChance ^ (1 - qualityPower) else 0
+
+		totalAdjustedWeight += adjustedWeight
+		table.insert(entries, {
+			PetId = petId,
+			BaseFinalChance = baseFinalChance,
+			AdjustedWeight = adjustedWeight,
+		})
+	end
+
+	if totalAdjustedWeight <= 0 then
+		return {
+			LuckBucket = luckBucket,
+			QualityPower = qualityPower,
+			Entries = {},
+			ChanceByPetId = {},
+		}
+	end
+
+	local cumulativeChance = 0
+	local chanceByPetId = {}
+
+	for index, entry in ipairs(entries) do
+		local chance = entry.AdjustedWeight / totalAdjustedWeight
+
+		if index == #entries then
+			chance = math.max(0, 1 - cumulativeChance)
+		end
+
+		cumulativeChance += chance
+		entry.Chance = chance
+		entry.CumulativeChance = if index == #entries then 1 else math.min(1, cumulativeChance)
+		chanceByPetId[entry.PetId] = chance
+	end
+
+	return {
+		LuckBucket = luckBucket,
+		QualityPower = qualityPower,
+		Entries = entries,
+		ChanceByPetId = chanceByPetId,
 	}
-
-	for _, entry in ipairs(entries) do
-		local pet = PetConfig.getPet(entry.PetId)
-
-		if pet ~= nil then
-			table.insert(preview, {
-				PetId = entry.PetId,
-				DisplayName = pet.DisplayName,
-				Rarity = pet.Rarity,
-				AuraRarity = pet.AuraRarity,
-				AuraRarityId = pet.AuraRarityId,
-				AuraRevealTier = pet.AuraRevealTier,
-				Chance = entry.Chance or 0,
-				OddsText = PetConfig.getChanceOddsText(entry.Chance or 0),
-				Power = PetConfig.getPetPower(entry.PetId),
-				Color = pet.Color,
-				AuraColor = pet.AuraColor,
-				AuraAccentColor = pet.AuraAccentColor,
-			})
-		end
-	end
-
-	return preview
 end
 
-local function rollSingleEntry(entries, random)
-	local totalChance = 0
+local function getRollDistribution(luck)
+	local luckBucket = getLuckBucket(luck)
+	local cachedDistribution = rollDistributionCache[luckBucket]
 
-	for _, entry in ipairs(entries) do
-		totalChance += entry.Chance or 0
+	if cachedDistribution ~= nil then
+		return cachedDistribution
 	end
 
-	if totalChance <= 0 then
-		return nil
+	if rollDistributionCacheCount >= ROLL_DISTRIBUTION_CACHE_CAPACITY then
+		table.clear(rollDistributionCache)
+		rollDistributionCacheCount = 0
 	end
 
-	local target = random:NextNumber(0, totalChance)
-	local runningChance = 0
+	local distribution = createRollDistribution(luckBucket)
 
-	for _, entry in ipairs(entries) do
-		runningChance += entry.Chance or 0
+	rollDistributionCache[luckBucket] = distribution
+	rollDistributionCacheCount += 1
 
-		if target <= runningChance then
-			return entry
-		end
-	end
-
-	return entries[#entries]
+	return distribution
 end
 
-local function getRollAttemptCount(luck, random)
-	local safeLuck = getSafeLuck(luck)
-	local attempts = math.max(1, math.floor(safeLuck))
-	local fractionalAttemptChance = safeLuck - attempts
+function PetConfig.getAdjustedPetChance(petId, luck)
+	local canonicalPetId = PetConfig.getCanonicalPetId(petId)
 
-	if fractionalAttemptChance > 0 and random:NextNumber() < fractionalAttemptChance then
-		attempts += 1
+	if canonicalPetId == nil then
+		return 0
 	end
 
-	return attempts
+	return getRollDistribution(luck).ChanceByPetId[canonicalPetId] or 0
 end
 
-function PetConfig.roll(luck, random)
-	local entries = PetConfig.getRollEntries()
+function PetConfig.getAdjustedRollPreview(luck, damageMultiplier)
+	local distribution = getRollDistribution(luck)
+	local entries = {}
 
-	if #entries == 0 then
-		return nil
-	end
+	for _, distributionEntry in ipairs(distribution.Entries) do
+		local pet = PetConfig.getPet(distributionEntry.PetId)
+		local parts = PetConfig.getPetParts(distributionEntry.PetId)
 
-	local rng = random or Random.new()
-	local attempts = getRollAttemptCount(luck, rng)
-	local bestEntry = nil
-	local bestScore = -math.huge
+		if pet ~= nil and parts ~= nil then
+			local basePet = PetConfig.getBasePet(parts.BasePetId)
+			local auraRarity = PetConfig.getAuraRarity(parts.AuraRarityId or parts.VariantId)
+			local size = PetConfig.getSize(parts.SizeId)
+			local power = PetConfig.getPetDamage(distributionEntry.PetId, damageMultiplier)
 
-	for _ = 1, attempts do
-		local entry = rollSingleEntry(entries, rng)
-
-		if entry ~= nil then
-			local score = PetConfig.getRarityScore(entry.PetId)
-
-			if score > bestScore then
-				bestEntry = entry
-				bestScore = score
+			if basePet ~= nil and auraRarity ~= nil and size ~= nil then
+				table.insert(entries, {
+					PetId = distributionEntry.PetId,
+					CanonicalPetId = pet.CanonicalPetId,
+					DisplayName = pet.DisplayName,
+					BasePetId = parts.BasePetId,
+					BaseDisplayName = basePet.DisplayName,
+					BasePetDisplayName = basePet.DisplayName,
+					BasePetDamage = basePet.Damage,
+					SizeId = parts.SizeId,
+					SizeDisplayName = if size.DisplayName == "" then "Normal" else size.DisplayName,
+					AuraRarityId = pet.AuraRarityId,
+					AuraId = pet.AuraRarityId,
+					AuraDisplayName = auraRarity.DisplayName,
+					Rarity = pet.Rarity,
+					AuraRarity = pet.AuraRarity,
+					AuraRevealTier = pet.AuraRevealTier,
+					BaseFinalChance = distributionEntry.BaseFinalChance,
+					AdjustedChance = distributionEntry.Chance,
+					Chance = distributionEntry.Chance,
+					OddsText = PetConfig.getChanceOddsText(distributionEntry.Chance),
+					BasePower = PetConfig.getPetPower(distributionEntry.PetId),
+					Power = power,
+					Damage = power,
+					Color = pet.Color,
+					AuraColor = pet.AuraColor,
+					AuraAccentColor = pet.AuraAccentColor,
+					Scale = pet.Scale,
+				})
 			end
 		end
 	end
 
-	return if bestEntry ~= nil then bestEntry.PetId else nil
+	return {
+		DisplayName = PetConfig.RollDisplayName,
+		LuckBucket = distribution.LuckBucket,
+		QualityPower = distribution.QualityPower,
+		OutcomeCount = #entries,
+		Entries = entries,
+	}
+end
+
+function PetConfig.getRollPreview(luck, damageMultiplier)
+	local adjustedPreview = PetConfig.getAdjustedRollPreview(luck, damageMultiplier)
+	local entries = adjustedPreview.Entries
+
+	-- Preserve the legacy mixed-table metadata for existing local call sites.
+	entries.DisplayName = adjustedPreview.DisplayName
+	entries.LuckBucket = adjustedPreview.LuckBucket
+	entries.QualityPower = adjustedPreview.QualityPower
+
+	return entries
+end
+
+function PetConfig.roll(luck, random)
+	local distribution = getRollDistribution(luck)
+
+	if #distribution.Entries == 0 then
+		return nil
+	end
+
+	local rng = random or Random.new()
+	local target = rng:NextNumber()
+
+	if not isFiniteNumber(target) then
+		target = 0
+	else
+		target = math.clamp(target, 0, 1)
+	end
+
+	for _, entry in ipairs(distribution.Entries) do
+		if target <= entry.CumulativeChance then
+			return entry.PetId
+		end
+	end
+
+	return distribution.Entries[#distribution.Entries].PetId
 end
 
 return PetConfig

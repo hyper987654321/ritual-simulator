@@ -1,3 +1,4 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -12,14 +13,24 @@ local RitualStoneConfig = require(Config:WaitForChild("RitualStoneConfig"))
 local Systems = script.Parent.Parent.Parent
 local ClientStateStore = require(Systems:WaitForChild("State"):WaitForChild("ClientStateStore"))
 
-local AUTO_ROLL_ICON_ROTATION_DEGREES_PER_SECOND = 180
 local AUTO_ROLL_NEXT_ROLL_DELAY_SECONDS = 0.2
-local AUTO_ROLL_RETRY_DELAY_SECONDS = 0.05
+local AUTO_ROLL_RETRY_DELAY_SECONDS = 0.25
+local AUTO_ROLL_MAX_BACKOFF_DELAY_SECONDS = 8
+local AUTO_ROLL_MAX_SERVER_RETRY_SECONDS = 30
+local AUTO_ROLL_MAX_BACKOFF_STEP = 5
 local ROLL_ROULETTE_LAND_OFFSET_MIN = 12
 local ROLL_ROULETTE_LAND_OFFSET_MAX = 46
 local ROLL_ROULETTE_SETTLE_SECONDS = 0.22
 
 local rollVisualRandom = Random.new()
+local player = Players.LocalPlayer
+
+local TERMINAL_SESSION_CODES = {
+	profile_not_ready = true,
+	profile_session_inactive = true,
+	profile_session_ended = true,
+	session_inactive = true,
+}
 
 local function mergeTable(baseTable, extraTable)
 	local result = {}
@@ -51,30 +62,55 @@ local function easeOutQuint(alpha)
 	return 1 - ((1 - resolvedAlpha) ^ 5)
 end
 
-local function getRollRetryDelay(result)
+local function getFiniteNonNegativeNumber(value)
+	if typeof(value) ~= "number" or value ~= value or math.abs(value) == math.huge or value < 0 then
+		return nil
+	end
+
+	return value
+end
+
+local function getRollRetryDelay(result, failureCount)
+	local backoffStep = math.clamp(math.floor((failureCount or 1) - 1), 0, AUTO_ROLL_MAX_BACKOFF_STEP)
+	local retryDelay = math.min(
+		AUTO_ROLL_MAX_BACKOFF_DELAY_SECONDS,
+		AUTO_ROLL_RETRY_DELAY_SECONDS * (2 ^ backoffStep)
+	)
+
+	if typeof(result) == "table" then
+		local serverRetryAfter = getFiniteNonNegativeNumber(result.RetryAfter)
+
+		if serverRetryAfter == nil and typeof(result.Roll) == "table" then
+			serverRetryAfter = getFiniteNonNegativeNumber(result.Roll.RetryAfter)
+		end
+
+		if serverRetryAfter ~= nil then
+			retryDelay = math.max(retryDelay, math.min(serverRetryAfter, AUTO_ROLL_MAX_SERVER_RETRY_SECONDS))
+		end
+	end
+
+	return retryDelay
+end
+
+local function isTerminalSessionResult(result)
 	if typeof(result) ~= "table" then
-		return AUTO_ROLL_RETRY_DELAY_SECONDS
+		return false
 	end
 
-	if typeof(result.RetryAfter) == "number" then
-		return math.max(AUTO_ROLL_RETRY_DELAY_SECONDS, result.RetryAfter)
-	end
+	local code = if typeof(result.Code) == "string" then result.Code else result.Reason
 
-	if typeof(result.Roll) == "table" and typeof(result.Roll.RetryAfter) == "number" then
-		return math.max(AUTO_ROLL_RETRY_DELAY_SECONDS, result.Roll.RetryAfter)
-	end
-
-	return AUTO_ROLL_RETRY_DELAY_SECONDS
+	return typeof(code) == "string" and TERMINAL_SESSION_CODES[code] == true
 end
 
 local function useRollActions(options)
 	local resolvedOptions = options or {}
 	local autoRollEnabled, setAutoRollEnabledState = React.useState(false)
-	local autoRollIconRotation, setAutoRollIconRotationState = React.useState(0)
 	local rollAnimation, setRollAnimationState = React.useState(nil)
 	local activeRollAnimationTokenRef = React.useRef(0)
 	local activeAutoRollSessionTokenRef = React.useRef(0)
 	local isMountedRef = React.useRef(true)
+	local progressionEpoch = resolvedOptions.ProgressionEpoch
+	local progressionEpochRef = React.useRef(progressionEpoch)
 
 	local getSnapshot = resolvedOptions.GetSnapshot or ClientStateStore.getSnapshot
 	local rollPet = resolvedOptions.RollPet or ClientStateStore.rollPet
@@ -95,8 +131,14 @@ local function useRollActions(options)
 		activeAutoRollSessionTokenRef.current += 1
 	end
 
+	local function terminateRollSession()
+		cancelActiveWork()
+		setStateIfMounted(setRollAnimationState, nil)
+		setStateIfMounted(setAutoRollEnabledState, false)
+	end
+
 	local function isCurrentRollAnimation(token)
-		return isMountedRef.current and activeRollAnimationTokenRef.current == token
+		return isMountedRef.current and player.Parent ~= nil and activeRollAnimationTokenRef.current == token
 	end
 
 	local function setRollAnimationForToken(token, updater)
@@ -203,6 +245,7 @@ local function useRollActions(options)
 			return mergeTable(current, {
 				Phase = "Reveal",
 				Pet = result.Pet,
+				ResultInfo = track[targetIndex],
 				Track = track,
 				TargetIndex = targetIndex,
 				TrackOffset = targetOffset,
@@ -219,13 +262,35 @@ local function useRollActions(options)
 		end)
 	end
 
-	local function requestRoll()
+	local function requestRoll(shouldContinue)
+		local requestEpoch = progressionEpochRef.current
 		local ok, result = pcall(rollPet)
 
 		if not ok then
 			warn(result)
 
-			return nil
+			return {
+				Ok = false,
+				Code = "client_roll_request_failed",
+			}
+		end
+
+		if shouldContinue ~= nil and not shouldContinue() then
+			return result
+		end
+
+		if isTerminalSessionResult(result) or player.Parent == nil then
+			terminateRollSession()
+			return result
+		end
+
+		local latestSnapshot = getSnapshot()
+		local latestEpoch = if typeof(latestSnapshot) == "table" then latestSnapshot.ProgressionEpoch else nil
+
+		if typeof(requestEpoch) == "number" and typeof(latestEpoch) == "number" and latestEpoch ~= requestEpoch then
+			progressionEpochRef.current = latestEpoch
+			terminateRollSession()
+			return result
 		end
 
 		if typeof(result) ~= "table" or result.Pet == nil then
@@ -248,44 +313,67 @@ local function useRollActions(options)
 	end, {})
 
 	React.useEffect(function()
+		local previousEpoch = progressionEpochRef.current
+		progressionEpochRef.current = progressionEpoch
+
+		if
+			typeof(previousEpoch) == "number"
+			and typeof(progressionEpoch) == "number"
+			and progressionEpoch ~= previousEpoch
+		then
+			terminateRollSession()
+		end
+	end, { progressionEpoch })
+
+	React.useEffect(function()
 		if not autoRollEnabled then
-			setStateIfMounted(setAutoRollIconRotationState, 0)
 			return
 		end
 
 		local cancelled = false
-		local rotationConnection = RunService.Heartbeat:Connect(function(deltaTime)
-			setStateIfMounted(setAutoRollIconRotationState, function(currentRotation)
-				return (currentRotation + deltaTime * AUTO_ROLL_ICON_ROTATION_DEGREES_PER_SECOND) % 360
-			end)
-		end)
-
 		activeAutoRollSessionTokenRef.current += 1
 
 		local sessionToken = activeAutoRollSessionTokenRef.current
+		local sessionEpoch = progressionEpochRef.current
 		local function isCurrentAutoSession()
-			return isMountedRef.current and not cancelled and activeAutoRollSessionTokenRef.current == sessionToken
+			return isMountedRef.current
+				and player.Parent ~= nil
+				and not cancelled
+				and activeAutoRollSessionTokenRef.current == sessionToken
+				and progressionEpochRef.current == sessionEpoch
 		end
 
 		task.spawn(function()
+			local failureCount = 0
+
 			while isCurrentAutoSession() do
-				local result = requestRoll()
+				local result = requestRoll(isCurrentAutoSession)
 
 				if not isCurrentAutoSession() then
 					break
 				end
 
 				if typeof(result) == "table" and result.Pet ~= nil then
+					failureCount = 0
 					task.wait(RitualStoneConfig.RollOpening.PetRevealSeconds + AUTO_ROLL_NEXT_ROLL_DELAY_SECONDS)
 				else
-					task.wait(getRollRetryDelay(result))
+					if isTerminalSessionResult(result) then
+						terminateRollSession()
+						break
+					end
+
+					failureCount += 1
+					task.wait(getRollRetryDelay(result, failureCount))
 				end
+			end
+
+			if player.Parent == nil then
+				terminateRollSession()
 			end
 		end)
 
 		return function()
 			cancelled = true
-			rotationConnection:Disconnect()
 
 			if activeAutoRollSessionTokenRef.current == sessionToken then
 				activeAutoRollSessionTokenRef.current += 1
@@ -301,7 +389,6 @@ local function useRollActions(options)
 
 	return {
 		AutoRollEnabled = autoRollEnabled,
-		AutoRollIconRotation = autoRollIconRotation,
 		RollAnimation = rollAnimation,
 		RollPet = function()
 			task.spawn(function()

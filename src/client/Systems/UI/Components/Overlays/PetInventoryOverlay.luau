@@ -108,8 +108,48 @@ local function createEmptyText()
 	})
 end
 
-local function getSortChance(petId)
-	local chance = PetConfig.getPetChance(petId)
+local function isFiniteNonNegativeNumber(value)
+	return typeof(value) == "number" and value == value and math.abs(value) ~= math.huge and value >= 0
+end
+
+local function getAdjustedOddsByPetId(snapshot)
+	local oddsByPetId = {}
+	local roll = if typeof(snapshot) == "table" and typeof(snapshot.Roll) == "table" then snapshot.Roll else nil
+	local preview = if roll ~= nil and typeof(roll.Preview) == "table" then roll.Preview else nil
+	local entries = if preview ~= nil and typeof(preview.Entries) == "table" then preview.Entries else nil
+
+	local hasAuthoritativeOdds = entries ~= nil
+
+	for _, entry in ipairs(entries or {}) do
+		if typeof(entry) == "table" and typeof(entry.PetId) == "string" then
+			oddsByPetId[entry.PetId] = entry
+		end
+	end
+
+	for _, petStack in ipairs((snapshot and snapshot.Pets) or {}) do
+		if typeof(petStack) == "table" and typeof(petStack.PetId) == "string" then
+			if
+				typeof(petStack.OddsText) == "string"
+				or isFiniteNonNegativeNumber(petStack.AdjustedChance)
+			then
+				hasAuthoritativeOdds = true
+				oddsByPetId[petStack.PetId] = petStack
+			end
+		end
+	end
+
+	return oddsByPetId, hasAuthoritativeOdds
+end
+
+local function getSortChance(petId, oddsByPetId, hasAuthoritativeOdds)
+	local odds = oddsByPetId[petId]
+	local chance = if typeof(odds) == "table" and isFiniteNonNegativeNumber(odds.AdjustedChance)
+		then odds.AdjustedChance
+		elseif typeof(odds) == "table" and isFiniteNonNegativeNumber(odds.Chance) then odds.Chance else nil
+
+	if chance == nil and not hasAuthoritativeOdds then
+		chance = PetConfig.getPetChance(petId)
+	end
 
 	if typeof(chance) ~= "number" or chance <= 0 then
 		return math.huge
@@ -118,10 +158,10 @@ local function getSortChance(petId)
 	return chance
 end
 
-local function sortPetStacksByRarity(stacks)
+local function sortPetStacksByRarity(stacks, oddsByPetId, hasAuthoritativeOdds)
 	table.sort(stacks, function(left, right)
-		local leftChance = getSortChance(left.PetId)
-		local rightChance = getSortChance(right.PetId)
+		local leftChance = getSortChance(left.PetId, oddsByPetId, hasAuthoritativeOdds)
+		local rightChance = getSortChance(right.PetId, oddsByPetId, hasAuthoritativeOdds)
 
 		if leftChance == rightChance then
 			return left.PetId < right.PetId
@@ -131,44 +171,55 @@ local function sortPetStacksByRarity(stacks)
 	end)
 end
 
-local function getInventoryStacks(snapshot)
+local function getInventoryStacks(snapshot, oddsByPetId, hasAuthoritativeOdds)
 	local stacks = {}
 
-	for _, petStack in ipairs(snapshot.Pets) do
+	for _, petStack in ipairs(snapshot.Pets or {}) do
 		table.insert(stacks, {
 			PetId = petStack.PetId,
 			Count = petStack.Count or 0,
 			EquippedCount = petStack.EquippedCount or 0,
 			StoredCount = petStack.StoredCount or math.max(0, (petStack.Count or 0) - (petStack.EquippedCount or 0)),
+			BasePower = petStack.BasePower,
+			Power = petStack.Power,
 		})
 	end
 
-	sortPetStacksByRarity(stacks)
+	sortPetStacksByRarity(stacks, oddsByPetId, hasAuthoritativeOdds)
 
 	return stacks
 end
 
-local function getBestPetStacks(snapshot)
+local function getBestPetStacks(snapshot, oddsByPetId, hasAuthoritativeOdds)
 	local stacks = {}
+	local inventoryByPetId = {}
 
-	for _, petInstance in ipairs(snapshot.EquippedPets) do
+	for _, petStack in ipairs(snapshot.Pets or {}) do
+		inventoryByPetId[petStack.PetId] = petStack
+	end
+
+	for _, petInstance in ipairs(snapshot.EquippedPets or {}) do
+		local inventoryStack = inventoryByPetId[petInstance.PetId] or {}
+
 		table.insert(stacks, {
 			PetId = petInstance.PetId,
 			Count = 1,
 			EquippedCount = 1,
 			StoredCount = 0,
+			BasePower = petInstance.BasePower or inventoryStack.BasePower,
+			Power = petInstance.Power or inventoryStack.Power,
 		})
 	end
 
-	sortPetStacksByRarity(stacks)
+	sortPetStacksByRarity(stacks, oddsByPetId, hasAuthoritativeOdds)
 
 	return stacks
 end
 
-local function getStoredPetStacks(snapshot)
+local function getStoredPetStacks(snapshot, oddsByPetId, hasAuthoritativeOdds)
 	local stacks = {}
 
-	for _, petStack in ipairs(getInventoryStacks(snapshot)) do
+	for _, petStack in ipairs(getInventoryStacks(snapshot, oddsByPetId, hasAuthoritativeOdds)) do
 		local storedCount = petStack.StoredCount or 0
 
 		if storedCount > 0 then
@@ -177,6 +228,8 @@ local function getStoredPetStacks(snapshot)
 				Count = storedCount,
 				EquippedCount = 0,
 				StoredCount = storedCount,
+				BasePower = petStack.BasePower,
+				Power = petStack.Power,
 			})
 		end
 	end
@@ -323,12 +376,11 @@ local function getTooltipPositionFromGui(guiObject, contentFrame)
 	return UDim2.fromOffset(math.floor(xOffset + 0.5), math.floor(yOffset + 0.5))
 end
 
-local function createPetTooltip(petStack, pet, petOddsText, position, zIndex)
+local function createPetTooltip(petStack, pet, petOddsText, powerText, position, zIndex)
 	local tooltipZIndex = zIndex or 120
 	local petName = getTooltipNameText(pet)
 	local rarityText = pet.Rarity or "Unknown"
 	local auraText = (pet.AuraRarity or "Plain") .. " aura"
-	local damageText = NumberFormatter.compact(pet.Damage or 0) .. " power"
 	local countText = "x" .. NumberFormatter.compact(petStack.Count or 1) .. " owned"
 	local rarityColor = PetConfig.getRarityColor(rarityText)
 	local auraColor = pet.AuraColor or Color3.fromRGB(235, 235, 240)
@@ -383,7 +435,7 @@ local function createPetTooltip(petStack, pet, petOddsText, position, zIndex)
 		}),
 		Aura = createTooltipRow("RitualCore", auraText, 3, tooltipZIndex + 1),
 		Odds = createTooltipRow("RollDice", petOddsText, 4, tooltipZIndex + 1),
-		Power = createTooltipRow("RitualCore", damageText, 5, tooltipZIndex + 1),
+		Power = createTooltipRow("RitualCore", powerText, 5, tooltipZIndex + 1),
 		Count = createTooltipRow("PetInventory", countText, 6, tooltipZIndex + 1),
 	})
 end
@@ -398,7 +450,24 @@ local function PetTile(props)
 	local pet = if hasPet then PetConfig.getPet(petStack.PetId) else nil
 	local petColor = if pet ~= nil then pet.Color else Color3.fromRGB(45, 45, 55)
 	local petAccentColor = if pet ~= nil then pet.AuraAccentColor or pet.AuraColor or petColor else petColor
-	local petOddsText = if pet ~= nil then PetConfig.getChanceOddsText(pet.RollChance) else ""
+	local oddsFact = if hasPet then props.OddsByPetId[petStack.PetId] else nil
+	local adjustedChance = if typeof(oddsFact) == "table" and isFiniteNonNegativeNumber(oddsFact.AdjustedChance)
+		then oddsFact.AdjustedChance
+		elseif typeof(oddsFact) == "table" and isFiniteNonNegativeNumber(oddsFact.Chance) then oddsFact.Chance else nil
+	local petOddsText = if typeof(oddsFact) == "table" and typeof(oddsFact.OddsText) == "string"
+		then oddsFact.OddsText
+		elseif adjustedChance ~= nil then PetConfig.getChanceOddsText(adjustedChance) else ""
+
+	if petOddsText == "" and pet ~= nil and not props.HasAuthoritativeOdds then
+		petOddsText = "Base " .. PetConfig.getChanceOddsText(pet.RollChance)
+	end
+
+	local authoritativePower = if isFiniteNonNegativeNumber(petStack.Power)
+		then petStack.Power
+		elseif typeof(oddsFact) == "table" and isFiniteNonNegativeNumber(oddsFact.Power) then oddsFact.Power else nil
+	local powerText = if authoritativePower ~= nil
+		then NumberFormatter.compact(authoritativePower) .. " power"
+		else NumberFormatter.compact((pet and pet.Damage) or 0) .. " base power"
 	local viewportRef = React.useRef(nil)
 	local children = {
 		Viewport = React.createElement("TextButton", {
@@ -415,7 +484,7 @@ local function PetTile(props)
 			ZIndex = tileZIndex,
 			[React.Event.MouseEnter] = if hasPet then function()
 				if onHoverStart ~= nil then
-					onHoverStart(petStack, pet, petOddsText, viewportRef.current)
+					onHoverStart(petStack, pet, petOddsText, powerText, viewportRef.current)
 				end
 			end else nil,
 			[React.Event.MouseLeave] = if hasPet then function()
@@ -482,16 +551,18 @@ local function PetTile(props)
 	}, children)
 end
 
-local function createPetTile(petStack, layoutOrder, onHoverStart, onHoverEnd)
+local function createPetTile(petStack, layoutOrder, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
 	return React.createElement(PetTile, {
+		HasAuthoritativeOdds = hasAuthoritativeOdds,
 		PetStack = petStack,
 		LayoutOrder = layoutOrder,
+		OddsByPetId = oddsByPetId,
 		OnHoverStart = onHoverStart,
 		OnHoverEnd = onHoverEnd,
 	})
 end
 
-local function createGridChildren(petStacks, onHoverStart, onHoverEnd)
+local function createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
 	local children = {
 		Padding = React.createElement("UIPadding", {
 			PaddingBottom = UDim.new(0, 10),
@@ -507,14 +578,23 @@ local function createGridChildren(petStacks, onHoverStart, onHoverEnd)
 	}
 
 	for index, petStack in ipairs(petStacks) do
-		children["Pet" .. tostring(index)] = createPetTile(petStack, index, onHoverStart, onHoverEnd)
+		children["Pet" .. tostring(index)] = createPetTile(
+			petStack,
+			index,
+			oddsByPetId,
+			hasAuthoritativeOdds,
+			onHoverStart,
+			onHoverEnd
+		)
 	end
 
 	return children
 end
 
-local function createBestGrid(petStacks, onHoverStart, onHoverEnd)
-	local children = if #petStacks > 0 then createGridChildren(petStacks, onHoverStart, onHoverEnd) else {
+local function createBestGrid(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+	local children = if #petStacks > 0
+		then createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+		else {
 		Empty = createEmptyText(),
 	}
 
@@ -527,8 +607,10 @@ local function createBestGrid(petStacks, onHoverStart, onHoverEnd)
 	}, children)
 end
 
-local function createStoredGrid(petStacks, onHoverStart, onHoverEnd)
-	local children = if #petStacks > 0 then createGridChildren(petStacks, onHoverStart, onHoverEnd) else {
+local function createStoredGrid(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+	local children = if #petStacks > 0
+		then createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+		else {
 		Empty = createEmptyText(),
 	}
 
@@ -557,11 +639,12 @@ local function PetInventoryOverlayComponent(props)
 	end
 
 	local maxEquippedPets = snapshot.MaxEquippedPets or PetConfig.MAX_EQUIPPED
-	local bestPetStacks = getBestPetStacks(snapshot)
-	local storedPetStacks = getStoredPetStacks(snapshot)
+	local oddsByPetId, hasAuthoritativeOdds = getAdjustedOddsByPetId(snapshot)
+	local bestPetStacks = getBestPetStacks(snapshot, oddsByPetId, hasAuthoritativeOdds)
+	local storedPetStacks = getStoredPetStacks(snapshot, oddsByPetId, hasAuthoritativeOdds)
 	local contentChildren = {}
 
-	local function showTooltip(petStack, pet, petOddsText, guiObject)
+	local function showTooltip(petStack, pet, petOddsText, powerText, guiObject)
 		if pet == nil then
 			setHoveredPet(nil)
 			return
@@ -570,6 +653,7 @@ local function PetInventoryOverlayComponent(props)
 		setHoveredPet({
 			Pet = pet,
 			PetOddsText = petOddsText,
+			PowerText = powerText,
 			PetStack = petStack,
 			Position = getTooltipPositionFromGui(guiObject, contentRef.current),
 		})
@@ -581,7 +665,7 @@ local function PetInventoryOverlayComponent(props)
 
 	contentChildren.BestPetsTitle = createLabel(string.format(
 		"Your Best Pets <font color=\"#25C9FF\">%d/%d</font>",
-		#snapshot.EquippedPets,
+		#(snapshot.EquippedPets or {}),
 		maxEquippedPets
 	), {
 		Font = UIThemeConfig.Font,
@@ -596,7 +680,13 @@ local function PetInventoryOverlayComponent(props)
 		ZIndex = 96,
 	})
 
-	contentChildren.BestGrid = createBestGrid(bestPetStacks, showTooltip, hideTooltip)
+	contentChildren.BestGrid = createBestGrid(
+		bestPetStacks,
+		oddsByPetId,
+		hasAuthoritativeOdds,
+		showTooltip,
+		hideTooltip
+	)
 	contentChildren.Divider = React.createElement("Frame", {
 		BackgroundColor3 = Color3.fromRGB(225, 225, 225),
 		BorderSizePixel = 0,
@@ -613,13 +703,20 @@ local function PetInventoryOverlayComponent(props)
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = 96,
 	})
-	contentChildren.Grid = createStoredGrid(storedPetStacks, showTooltip, hideTooltip)
+	contentChildren.Grid = createStoredGrid(
+		storedPetStacks,
+		oddsByPetId,
+		hasAuthoritativeOdds,
+		showTooltip,
+		hideTooltip
+	)
 
 	if hoveredPet ~= nil then
 		contentChildren.Tooltip = createPetTooltip(
 			hoveredPet.PetStack,
 			hoveredPet.Pet,
 			hoveredPet.PetOddsText,
+			hoveredPet.PowerText,
 			hoveredPet.Position,
 			130
 		)
