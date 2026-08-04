@@ -37,6 +37,10 @@ local RunePanel = require(HudComponents:WaitForChild("RunePanel"))
 local ShopOverlay = require(OverlayComponents:WaitForChild("ShopOverlay"))
 local TeleportOverlay = require(OverlayComponents:WaitForChild("TeleportOverlay"))
 local TutorialOverlay = require(HudComponents:WaitForChild("TutorialOverlay"))
+local GoalChip = require(HudComponents:WaitForChild("GoalChip"))
+local NotificationStack = require(HudComponents:WaitForChild("NotificationStack"))
+local DailyRewardOverlay = require(OverlayComponents:WaitForChild("DailyRewardOverlay"))
+local AwayRewardOverlay = require(OverlayComponents:WaitForChild("AwayRewardOverlay"))
 
 local Hooks = script.Parent.Parent:WaitForChild("Hooks")
 local useRollActions = require(Hooks:WaitForChild("useRollActions"))
@@ -49,6 +53,8 @@ local RITUAL_RUSH_OVERLAY_ID = "RitualRush"
 local REBIRTH_OVERLAY_ID = "Rebirth"
 local ASCENSION_OVERLAY_ID = "Ascension"
 local TELEPORT_OVERLAY_ID = "Teleport"
+local DAILY_OVERLAY_ID = "DailyReward"
+local AWAY_OVERLAY_ID = "AwayReward"
 
 local player = Players.LocalPlayer
 
@@ -458,6 +464,15 @@ local function HudApp()
 		end)
 	end
 
+	React.useEffect(function()
+		if activeOverlay ~= nil or snapshot == nil then return end
+		if snapshot.AwayRewards and snapshot.AwayRewards.HasPendingClaim == true then
+			setActiveOverlay(AWAY_OVERLAY_ID)
+		elseif snapshot.DailyRewards and snapshot.DailyRewards.CanClaim == true then
+			setActiveOverlay(DAILY_OVERLAY_ID)
+		end
+	end, { snapshot and snapshot.AwayRewards and snapshot.AwayRewards.HasPendingClaim, snapshot and snapshot.DailyRewards and snapshot.DailyRewards.CanClaim, activeOverlay })
+
 	if snapshot == nil then
 		return React.createElement("Frame", {
 			BackgroundTransparency = 1,
@@ -482,6 +497,18 @@ local function HudApp()
 	local rollScreenScale = RollScreenOverlay.getScale(viewportSize)
 	local rollScreenVisible = rollScreenOpen and not hideRollAnimation
 
+	local function claimDaily(dayIndex)
+		runServerAction(function() return ClientStateStore.claimDailyReward(dayIndex) end)
+	end
+
+	local function claimAway(sequence)
+		runServerAction(function() return ClientStateStore.claimAwayRewards(sequence) end)
+	end
+
+	local function dismissAway(sequence)
+		runServerAction(function() return ClientStateStore.dismissAwayRewards(sequence) end)
+	end
+
 	return React.createElement("Frame", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1),
@@ -496,6 +523,13 @@ local function HudApp()
 		}) else nil,
 
 		StatsPanel = if not rollScreenVisible then createStatsPanel(snapshot, zoneName) else nil,
+
+		GoalChip = if not rollScreenVisible then GoalChip.create({
+			Snapshot = snapshot,
+			OnOpen = function() setActiveOverlay(AWAY_OVERLAY_ID) end,
+		}) else nil,
+
+		Notifications = if not rollScreenVisible then NotificationStack.create({ Feedback = feedback }) else nil,
 
 		RunePanel = if not rollScreenVisible then RunePanel.create({
 			Feedback = feedback,
@@ -575,6 +609,14 @@ local function HudApp()
 			})
 			else nil,
 
+		AwayRewardOverlay = if activeOverlay == AWAY_OVERLAY_ID and not rollScreenVisible
+			then AwayRewardOverlay.create({ Snapshot = snapshot, OnClaim = claimAway, OnDismiss = dismissAway, OnClose = closeOverlay })
+			else nil,
+
+		DailyRewardOverlay = if activeOverlay == DAILY_OVERLAY_ID and not rollScreenVisible
+			then DailyRewardOverlay.create({ Snapshot = snapshot, OnClaim = claimDaily, OnClose = closeOverlay })
+			else nil,
+
 		RollScreenContent = if rollScreenVisible then RollScreenOverlay.create({
 			AutoRollEnabled = autoRollEnabled,
 			OnHide = hideRollScreen,
@@ -638,10 +680,7 @@ local function HudApp()
 			ZIndex = 60,
 		}, Enum.FillDirection.Vertical, rightHudControlScale) else nil,
 
-		TutorialOverlay = TutorialOverlay.create({
-			OnSkip = skipTutorialStep,
-			Step = tutorialStep,
-		}),
+		TutorialOverlay = nil,
 	})
 end
 

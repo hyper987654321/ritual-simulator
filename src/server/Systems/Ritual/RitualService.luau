@@ -25,6 +25,10 @@ local SNAPSHOT_RATE_LIMIT = {
 	Capacity = 4,
 	RefillPerSecond = 1,
 }
+local FEATURE_RATE_LIMIT = {
+	Capacity = 2,
+	RefillPerSecond = 1,
+}
 local MINIMUM_RETRY_AFTER_SECONDS = 0.05
 
 local function getPayloadValue(payload, key)
@@ -33,6 +37,15 @@ local function getPayloadValue(payload, key)
 	end
 
 	return payload[key]
+end
+
+local function getStrictScalarPayload(payload, key, expectedType)
+	if typeof(payload) ~= "table" then return nil end
+	for payloadKey in pairs(payload) do
+		if payloadKey ~= key then return nil end
+	end
+	local value = payload[key]
+	return if typeof(value) == expectedType then value else nil
 end
 
 local actionHandlers = {
@@ -102,6 +115,22 @@ local actionHandlers = {
 
 	[Network.Actions.BuyPotionWithGems] = function(player, payload)
 		return PlayerStateService.buyPotionWithGems(player, getPayloadValue(payload, "PotionId"))
+	end,
+
+	[Network.Actions.ClaimDailyReward] = function(player, payload)
+		return PlayerStateService.claimDailyReward(player, getStrictScalarPayload(payload, "DayIndex", "number"))
+	end,
+
+	[Network.Actions.ClaimAwayRewards] = function(player, payload)
+		return PlayerStateService.resolveAwayRewards(player, "claimed", getStrictScalarPayload(payload, "Sequence", "number"))
+	end,
+
+	[Network.Actions.DismissAwayRewards] = function(player, payload)
+		return PlayerStateService.resolveAwayRewards(player, "dismissed", getStrictScalarPayload(payload, "Sequence", "number"))
+	end,
+
+	[Network.Actions.UpdateGuidance] = function(player, payload)
+		return PlayerStateService.updateGuidance(player, payload)
 	end,
 }
 
@@ -223,6 +252,18 @@ local function processAction(player, actionName, payload)
 
 	if rateLimitedResponse ~= nil then
 		return rateLimitedResponse
+	end
+
+	if actionName == Network.Actions.ClaimDailyReward
+		or actionName == Network.Actions.ClaimAwayRewards
+		or actionName == Network.Actions.DismissAwayRewards
+		or actionName == Network.Actions.UpdateGuidance
+	then
+		local featureRateLimitedResponse = getRateLimitedResponse(player, "Retention", FEATURE_RATE_LIMIT)
+
+		if featureRateLimitedResponse ~= nil then
+			return featureRateLimitedResponse
+		end
 	end
 
 	return PlayerStateService.withProfileLock(player, function()

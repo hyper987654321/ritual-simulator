@@ -36,6 +36,10 @@ Network.Actions = {
 	ClaimRitualRushFreeReward = "ClaimRitualRushFreeReward",
 	UsePotion = "UsePotion",
 	BuyPotionWithGems = "BuyPotionWithGems",
+	ClaimDailyReward = "ClaimDailyReward",
+	ClaimAwayRewards = "ClaimAwayRewards",
+	DismissAwayRewards = "DismissAwayRewards",
+	UpdateGuidance = "UpdateGuidance",
 }
 
 local function getFolder()

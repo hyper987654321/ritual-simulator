@@ -26,6 +26,9 @@ local CrystalCombat = require(script.Parent.Parent:WaitForChild("Ritual"):WaitFo
 local RuneFocusProgress = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("RuneFocusProgress"))
 local RitualRushProgress = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("RitualRushProgress"))
 local RitualStoneProgress = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("RitualStoneProgress"))
+local DailyRewardProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("DailyRewardProgress"))
+local AwayRewardProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("AwayRewardProgress"))
+local OnboardingProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("OnboardingProgress"))
 
 local PlayerStateService = {}
 
@@ -315,31 +318,62 @@ local function updateProgressRecords(profile, stats, ritualPower)
 end
 
 local function completeOnboardingMilestone(profile, milestoneId)
-	if table.find(ProfileContract.OnboardingMilestoneOrder, milestoneId) == nil then
-		return false
+	local _, stats = PlayerDerivedState.getCurrentRitualRuntime(profile)
+	local result = OnboardingProgress.complete(profile, milestoneId, {
+		Authoritative = true,
+		Capacity = stats.Capacity,
+	})
+
+	if result.Changed == true then
+		PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.OnboardingMilestoneComplete, {
+			MilestoneId = milestoneId,
+			Reward = result.Reward,
+		})
 	end
 
-	local onboarding = if typeof(profile.Onboarding) == "table" then profile.Onboarding else {}
-	local milestones = if typeof(onboarding.Milestones) == "table" then onboarding.Milestones else {}
-
-	onboarding.Version = 1
-	onboarding.IntroSeen = onboarding.IntroSeen == true
-	onboarding.GuidanceHidden = onboarding.GuidanceHidden == true
-	onboarding.Milestones = milestones
-	onboarding.Rewarded = if typeof(onboarding.Rewarded) == "table" then onboarding.Rewarded else {}
-	profile.Onboarding = onboarding
-
-	if milestones[milestoneId] == true then
-		return false
-	end
-
-	milestones[milestoneId] = true
-
-	return true
+	return result.Changed == true
 end
 
 local function hasPendingAwayClaim(profile)
 	return typeof(profile.AwayRewards) == "table" and typeof(profile.AwayRewards.Pending) == "table"
+end
+
+local function getAwayContext(profile)
+	local runeBonuses, stats, equippedPetPower = PlayerDerivedState.getCurrentRitualRuntime(profile)
+	local ascensionBonuses = AscensionConfig.getStatBonuses(profile)
+	local awayCapMinutes = 30
+		+ 15 * getNonNegativeInteger(profile.Rebirths)
+		+ 120 * getNonNegativeInteger(profile.Ascensions)
+		+ 30 * getNonNegativeInteger(profile.AscensionStars)
+		+ getNonNegativeInteger(ascensionBonuses.OfflineCapBonusMinutes)
+
+	return {
+		ZoneId = profile.CurrentZone,
+		UnlockedZones = profile.UnlockedZones,
+		EffectiveTeamDamage = equippedPetPower,
+		Capacity = stats.Capacity,
+		Essence = profile.Essence,
+		PersistentEssenceMultiplier = stats.EssenceMultiplier,
+		PersistentRuneChargeMultiplier = stats.RebirthRuneChargeMultiplier
+			* stats.AscensionRuneChargeMultiplier,
+		CapacityStateMultiplier = 1,
+		ActiveRuneFocusId = if typeof(profile.RuneFocus) == "table" then profile.RuneFocus.ActiveId else nil,
+		AwayCapMinutes = awayCapMinutes,
+		RuneChargeMultiplier = runeBonuses.PetPowerMultiplier,
+	}
+end
+
+local function refreshAwayCheckpoint(profile, nowUnix)
+	local result = AwayRewardProgress.refreshCheckpoint(profile, getAwayContext(profile), nowUnix)
+
+	if result.Offer ~= nil then
+		PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.AwayRewardReady, {
+			ObservedMinutes = result.Offer.ObservedMinutes,
+			EligibleMinutes = result.Offer.EligibleMinutes,
+		})
+	end
+
+	return result
 end
 
 local function getZoneUnlockFailureMessage(profile, zoneId, zone)
@@ -1039,7 +1073,7 @@ function PlayerStateService.withProfileLock(player, callback)
 		task.wait()
 	end
 
-	local ok, result = pcall(callback)
+	local ok, result = pcall(callback, PlayerStateService.getProfile(player))
 
 	table.remove(queue, 1)
 
@@ -1052,6 +1086,21 @@ function PlayerStateService.withProfileLock(player, callback)
 	end
 
 	return result
+end
+
+function PlayerStateService.grantSocialReward(_player, profile, amount)
+	if typeof(profile) ~= "table" then
+		return false
+	end
+
+	local current = getNonNegativeInteger(profile.RitualGems)
+	local granted = math.min(getNonNegativeInteger(amount), ProfileContract.MaximumExactInteger - current)
+	profile.RitualGems = current + granted
+	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.FirstCoplayReward, {
+		RitualGems = granted,
+	})
+	profile.SnapshotRevision = addExactIntegers(profile.SnapshotRevision, 1)
+	return granted > 0
 end
 
 function PlayerStateService.waitForProfile(player, timeoutSeconds)
@@ -1463,6 +1512,110 @@ function PlayerStateService.completeTutorialStep(_player, _stepId, _completionMo
 	}
 end
 
+function PlayerStateService.updateGuidance(player, values)
+	local profile = PlayerStateService.getProfile(player)
+
+	if profile == nil or typeof(values) ~= "table" then
+		return { Ok = false, Changed = false, Code = "profile_not_ready" }
+	end
+
+	local recognized = false
+	for key, value in pairs(values) do
+		if key ~= "IntroSeen" and key ~= "GuidanceHidden" then
+			return { Ok = false, Changed = false, Code = "invalid_guidance_update" }
+		end
+		if typeof(value) ~= "boolean" then
+			return { Ok = false, Changed = false, Code = "invalid_guidance_update" }
+		end
+		recognized = true
+	end
+
+	if not recognized then
+		return { Ok = false, Changed = false, Code = "invalid_guidance_update" }
+	end
+
+	local changed = OnboardingProgress.updateGuidance(profile, values)
+	if changed then
+		profile.SnapshotRevision = addExactIntegers(profile.SnapshotRevision, 1)
+	end
+
+	return {
+		Ok = true,
+		Changed = changed,
+		Code = if changed then "guidance_updated" else "guidance_unchanged",
+	}
+end
+
+function PlayerStateService.claimDailyReward(player, requestedDayIndex)
+	local profile = PlayerStateService.getProfile(player)
+	if profile == nil then
+		return { Ok = false, Changed = false, Code = "profile_not_ready" }
+	end
+
+	local nowUnix = DateTime.now().UnixTimestamp
+	local result = DailyRewardProgress.claim(profile, requestedDayIndex, nowUnix)
+	if result.Changed ~= true then
+		return result
+	end
+
+	profile.SnapshotRevision = addExactIntegers(profile.SnapshotRevision, 1)
+	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.DailyRewardClaimed, result.Reward)
+	commitProfileForPersistence(profile)
+	local saved = ProfilePersistence.saveConfirmed(player, profile, function(data)
+		return typeof(data) == "table"
+			and typeof(data.DailyRewards) == "table"
+			and data.DailyRewards.LastClaimedDay == result.Snapshot.DayIndex
+	end)
+	if saved ~= true then
+		return { Ok = false, Changed = true, Code = "save_confirmation_failed", RetryAfter = 1 }
+	end
+
+	return result
+end
+
+function PlayerStateService.resolveAwayRewards(player, kind, sequence)
+	local profile = PlayerStateService.getProfile(player)
+	if profile == nil then
+		return { Ok = false, Changed = false, Code = "profile_not_ready" }
+	end
+
+	local result = AwayRewardProgress.resolve(profile, kind, sequence, getAwayContext(profile), function(focusId, requestedCharge)
+		local runeFocus = profile.RuneFocus
+		local previousFocusId = runeFocus.ActiveId
+		runeFocus.ActiveId = focusId
+		local granted = RuneFocusProgress.grantOnlineCrystalBreak(profile, {
+			ZoneId = profile.CurrentZone,
+			BaseCrystalReward = requestedCharge,
+			ActualCrystalReward = requestedCharge,
+			EssenceAwarded = requestedCharge,
+			RebirthChargeMultiplier = 1,
+			AscensionChargeMultiplier = 1,
+			ActiveRunePotionMultiplier = 1,
+		})
+		runeFocus.ActiveId = previousFocusId
+		return granted
+	end, DateTime.now().UnixTimestamp)
+
+	if result.Changed ~= true then
+		return result
+	end
+
+	profile.SnapshotRevision = addExactIntegers(profile.SnapshotRevision, 1)
+	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.AwayRewardClaimed, result.Resolution)
+	commitProfileForPersistence(profile)
+	local saved = ProfilePersistence.saveConfirmed(player, profile, function(data)
+		return typeof(data) == "table"
+			and typeof(data.AwayRewards) == "table"
+			and typeof(data.AwayRewards.LastResolution) == "table"
+			and data.AwayRewards.LastResolution.Sequence == sequence
+	end)
+	if saved ~= true then
+		return { Ok = false, Changed = true, Code = "save_confirmation_failed", RetryAfter = 1 }
+	end
+
+	return result
+end
+
 function PlayerStateService.claimRitualRushReward(player, milestoneId, track)
 	local profile = PlayerStateService.getProfile(player)
 
@@ -1833,6 +1986,12 @@ function PlayerStateService.rebirth(player)
 	profile.Rebirths = addExactIntegers(profile.Rebirths, 1)
 	completeOnboardingMilestone(profile, "first_rebirth")
 	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.Rebirth)
+	local dailyBonus = DailyRewardProgress.grantFirstRebirthOfDay(profile, function(dailyProfile, source, count)
+		return RitualRushProgress.awardPoints(dailyProfile, source, count)
+	end, DateTime.now().UnixTimestamp)
+	if dailyBonus.Changed == true then
+		PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.FirstRebirthDailyBonus, dailyBonus.Reward)
+	end
 	profile.Essence = 0
 	profile.CurrentZone = 1
 	profile.UnlockedZones = {
@@ -1844,6 +2003,7 @@ function PlayerStateService.rebirth(player)
 	profile.RuneFocusSelectionReadyAt = 0
 	CrystalCombat.resetState(profile, 1)
 	CrystalCombat.setFarmingActive(profile, false)
+	refreshAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
 	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.RebirthComplete, {
 		Rebirths = profile.Rebirths,
 	})
@@ -1961,6 +2121,7 @@ function PlayerStateService.ascend(player)
 
 	CrystalCombat.resetState(profile, 1)
 	CrystalCombat.setFarmingActive(profile, false)
+	refreshAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
 	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.Ascension)
 	PlayerFeedbackQueue.queue(profile, PresentationEventConfig.EventIds.AscensionComplete, {
 		Ascensions = nextAscensions,
@@ -2434,6 +2595,7 @@ function PlayerStateService.buyStoneUpgrade(player, upgradeId)
 		Level = result.Level,
 		EssenceSpent = result.EssenceSpent,
 	})
+	completeOnboardingMilestone(profile, "first_stone_upgrade")
 
 	local _, updatedStats = PlayerDerivedState.getCurrentRitualRuntime(profile)
 	collectCrystalRewardWithRush(profile, updatedStats)
@@ -2514,6 +2676,7 @@ local function loadProfileForPlayer(player, loadToken, loadContext)
 		reconcilePetIds(profile)
 		CrystalCombat.ensureState(profile)
 		CrystalCombat.clearRuntime(profile)
+		refreshAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
 		commitProgressRecords(profile)
 
 		if not ProfilePersistence.sync(player, profile) then
@@ -2640,7 +2803,10 @@ local function releaseProfileForPlayer(player)
 	end
 
 	local profile = record.Profile
-	local committed, commitError = pcall(commitProfileForPersistence, profile)
+	local committed, commitError = pcall(function()
+		refreshAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
+		commitProfileForPersistence(profile)
+	end)
 
 	local released = ProfilePersistence.releaseSession(player, profile, record.Token)
 
@@ -2693,7 +2859,10 @@ function PlayerStateService.start()
 				local profile = record.Profile
 
 				task.spawn(function()
-					local ok, synchronized = pcall(PlayerStateService.syncProfile, player, profile)
+					local ok, synchronized = pcall(function()
+						refreshAwayCheckpoint(profile, DateTime.now().UnixTimestamp)
+						return PlayerStateService.syncProfile(player, profile)
+					end)
 
 					if not ok or synchronized ~= true then
 						warn("[PlayerStateService] Periodic profile synchronization failed")

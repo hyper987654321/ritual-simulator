@@ -785,4 +785,26 @@ function ClientStateStore.buyPotionWithGems(potionId)
 	})
 end
 
+function ClientStateStore.claimDailyReward(dayIndex)
+	return requestAction(Network.Actions.ClaimDailyReward, {
+		DayIndex = dayIndex,
+	})
+end
+
+function ClientStateStore.claimAwayRewards(sequence)
+	return requestAction(Network.Actions.ClaimAwayRewards, {
+		Sequence = sequence,
+	})
+end
+
+function ClientStateStore.dismissAwayRewards(sequence)
+	return requestAction(Network.Actions.DismissAwayRewards, {
+		Sequence = sequence,
+	})
+end
+
+function ClientStateStore.updateGuidance(values)
+	return requestAction(Network.Actions.UpdateGuidance, values)
+end
+
 return ClientStateStore

@@ -15,6 +15,8 @@ local TutorialConfig = require(Config:WaitForChild("TutorialConfig"))
 local ZoneConfig = require(Config:WaitForChild("ZoneConfig"))
 local CrystalCombat = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("CrystalCombat"))
 local RuneFocusProgress = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("RuneFocusProgress"))
+local DailyRewardProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("DailyRewardProgress"))
+local OnboardingProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("OnboardingProgress"))
 
 local PlayerDerivedState = {}
 
@@ -434,7 +436,7 @@ local function getRuneFocusSnapshot(profile, stats)
 	}
 end
 
-local function getOnboardingSnapshot(profile)
+local function getOnboardingSnapshot(profile, context)
 	local source = if typeof(profile.Onboarding) == "table" then profile.Onboarding else {}
 	local sourceMilestones = if typeof(source.Milestones) == "table" then source.Milestones else {}
 	local milestones = {}
@@ -456,6 +458,8 @@ local function getOnboardingSnapshot(profile)
 		rewarded[milestoneId] = sourceRewarded[milestoneId] == true
 	end
 
+	local currentGoal = OnboardingProgress.buildGoal(profile, context)
+
 	return {
 		IntroSeen = source.IntroSeen == true,
 		GuidanceHidden = source.GuidanceHidden == true,
@@ -463,7 +467,7 @@ local function getOnboardingSnapshot(profile)
 		CompletedMilestoneIds = completedMilestoneIds,
 		Milestones = milestones,
 		Rewarded = rewarded,
-		CurrentGoal = nil,
+		CurrentGoal = currentGoal,
 	}
 end
 
@@ -479,24 +483,17 @@ local function getAutomationSnapshot(profile)
 end
 
 local function getDailyRewardsSnapshot(profile, nowUnix)
+	local snapshot = DailyRewardProgress.buildSnapshot(profile, nowUnix)
 	local source = if typeof(profile.DailyRewards) == "table" then profile.DailyRewards else {}
-	local dayIndex = math.floor(nowUnix / 86_400)
-
-	return {
-		DayIndex = dayIndex,
-		StartsAtUnix = dayIndex * 86_400,
-		EndsAtUnix = (dayIndex + 1) * 86_400,
-		LastClaimedDay = source.LastClaimedDay or -1,
-		CurrentCycleDay = source.CycleDay or 0,
-		FirstRebirthRewardDay = source.FirstRebirthRewardDay or -1,
-		IsClaimedToday = source.LastClaimedDay == dayIndex,
-		FirstRebirthRewardClaimed = source.FirstRebirthRewardDay == dayIndex,
-	}
+	snapshot.LastClaimedDay = source.LastClaimedDay or -1
+	snapshot.FirstRebirthRewardDay = source.FirstRebirthRewardDay or -1
+	return snapshot
 end
 
 local function getAwayRewardsSnapshot(profile)
 	local source = if typeof(profile.AwayRewards) == "table" then profile.AwayRewards else {}
 	local pending = if typeof(source.Pending) == "table" then source.Pending else nil
+	local _, currentStats = PlayerDerivedState.getCurrentRitualRuntime(profile)
 
 	if pending == nil then
 		return {
@@ -521,6 +518,12 @@ local function getAwayRewardsSnapshot(profile)
 		EligibleMinutes = getSafeInteger(pending.EligibleMinutes, ProfileContract.MaximumExactInteger),
 		WasTimeCapped = pending.WasTimeCapped == true,
 		EssenceOffered = getSafeInteger(pending.PotentialEssence, ProfileContract.MaximumExactInteger),
+		EssenceClaimableNow = math.min(
+			getSafeInteger(pending.PotentialEssence, ProfileContract.MaximumExactInteger),
+			math.max(0, getSafeInteger(currentStats.Capacity, ProfileContract.MaximumExactInteger) - getSafeInteger(profile.Essence, ProfileContract.MaximumExactInteger))
+		),
+		IsCapacityLimited = getSafeInteger(pending.PotentialEssence, ProfileContract.MaximumExactInteger)
+			> math.max(0, getSafeInteger(currentStats.Capacity, ProfileContract.MaximumExactInteger) - getSafeInteger(profile.Essence, ProfileContract.MaximumExactInteger)),
 		RuneChargeByFocus = runeChargeByFocus,
 	}
 end
@@ -671,7 +674,15 @@ function PlayerDerivedState.getSnapshot(profile)
 		RitualRush = RitualRushConfig.getSnapshot(profile.RitualRush, serverNowUnix),
 		DailyRewards = getDailyRewardsSnapshot(profile, serverNowUnix),
 		AwayRewards = getAwayRewardsSnapshot(profile),
-		Onboarding = getOnboardingSnapshot(profile),
+		Onboarding = getOnboardingSnapshot(profile, {
+			Capacity = stats.Capacity,
+			CanRebirth = canRebirth,
+			CanAscend = ascensionSnapshot.CanAscend,
+			Ascension = ascensionSnapshot,
+			InCrystalArea = profile.CrystalFarmingActive == true,
+			StoneUpgradeLevels = profile.StoneLevels.Capacity,
+			NextZoneId = profile.CurrentZone + 1,
+		}),
 		Social = getSocialSnapshot(profile),
 		ActiveBoosts = BoostConfig.getActiveBoostSnapshots(profile.ActiveBoosts, serverNowUnix),
 		Potions = PotionConfig.getPotionSnapshots(profile.Potions),
@@ -891,7 +902,17 @@ function PlayerDerivedState.getCrystalUpdate(profile, requestedSections)
 	end
 
 	if sections.Onboarding == true then
-		update.Onboarding = getOnboardingSnapshot(profile)
+		local ascension = PlayerDerivedState.getAscensionSnapshot(profile)
+		local rebirthRequirement = RitualStoneConfig.getRebirthRequirement(profile.Rebirths)
+		update.Onboarding = getOnboardingSnapshot(profile, {
+			Capacity = stats.Capacity,
+			CanRebirth = PlayerDerivedState.canRebirth(profile, rebirthRequirement),
+			CanAscend = ascension.CanAscend,
+			Ascension = ascension,
+			InCrystalArea = profile.CrystalFarmingActive == true,
+			StoneUpgradeLevels = profile.StoneLevels.Capacity,
+			NextZoneId = profile.CurrentZone + 1,
+		})
 	end
 
 	if sections.Tutorial == true then
