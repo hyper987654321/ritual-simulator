@@ -267,6 +267,7 @@ local function HudApp()
 	local snapshot, setSnapshot = React.useState(ClientStateStore.getSnapshot())
 	local feedback, setFeedback = React.useState(ClientStateStore.getFeedback())
 	local purchaseStatus, setPurchaseStatus = React.useState(ProductPurchaseController.getLastResult())
+	local menuOpen, setMenuOpen = React.useState(false)
 	local rollActions = useRollActions({
 		BuildRollRouletteTrack = RollScreenOverlay.buildRollRouletteTrack,
 		GetRollAnimationDurationScale = RollScreenOverlay.getRollAnimationDurationScale,
@@ -457,6 +458,12 @@ local function HudApp()
 		end)
 	end
 
+	local function toggleMoreMenu()
+		setMenuOpen(function(currentMenuOpen)
+			return not currentMenuOpen
+		end)
+	end
+
 	local function claimRetention(retentionId)
 		runServerAction(function() return ClientStateStore.claimRetention(retentionId) end)
 	end
@@ -601,6 +608,27 @@ local function HudApp()
 	local hudControlScale = HudIconBar.getControlScale(viewportSize, HudLayoutConfig.DefaultViewportSize, 4)
 	local rollScreenScale = RollScreenOverlay.getScale(viewportSize)
 	local rollScreenVisible = rollScreenOpen and not hideRollAnimation
+	local bottomNavigation = if not rollScreenVisible then HudBottomNav.create({
+			MenuOpen = menuOpen,
+			OnToggleMore = toggleMoreMenu,
+			ViewportSize = viewportSize,
+			OnPets = togglePetInventoryOverlay,
+			OnRoll = activateRollScreen,
+			OnRitual = toggleRitualCoreOverlay,
+			OnZones = toggleTeleportOverlay,
+			OnShop = toggleShopOverlay,
+			OnRitualRush = toggleRitualRushOverlay,
+			OnRebirth = toggleRebirthOverlay,
+			OnRetention = toggleRetentionOverlay,
+			OnLeaderboard = toggleLeaderboardOverlay,
+			OnSocial = toggleSocialOverlay,
+		}) else HudBottomNav.create({
+			MenuOpen = menuOpen,
+			OnToggleMore = toggleMoreMenu,
+			RollOnly = true,
+			ViewportSize = viewportSize,
+			OnRoll = activateRollScreen,
+		})
 
 	local function claimDaily(dayIndex)
 		runServerAction(function() return ClientStateStore.claimDailyReward(dayIndex) end)
@@ -743,19 +771,7 @@ local function HudApp()
 			Scale = rollScreenScale,
 		}) else nil,
 
-		BottomNavigation = if not rollScreenVisible then HudBottomNav.create({
-			ViewportSize = viewportSize,
-			OnPets = togglePetInventoryOverlay,
-			OnRoll = activateRollScreen,
-			OnRitual = toggleRitualCoreOverlay,
-			OnZones = toggleTeleportOverlay,
-			OnShop = toggleShopOverlay,
-			OnRitualRush = toggleRitualRushOverlay,
-			OnRebirth = toggleRebirthOverlay,
-			OnRetention = toggleRetentionOverlay,
-			OnLeaderboard = toggleLeaderboardOverlay,
-			OnSocial = toggleSocialOverlay,
-		}) else HudBottomNav.create({ RollOnly = true, ViewportSize = viewportSize, OnRoll = activateRollScreen }),
+		BottomNavigation = bottomNavigation,
 
 		TutorialOverlay = nil,
 	})
