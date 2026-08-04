@@ -203,9 +203,13 @@ function AwayRewardProgress.calculateOffer(checkpoint, nowUnix)
 		))
 	end
 
-	local chargeByFocus = cloneFocusMap({
-		[checkpoint.ActiveRuneFocusId] = runeCharge,
-	})
+	local chargeByFocus = {}
+
+	if checkpoint.ActiveRuneFocusId ~= nil then
+		chargeByFocus[checkpoint.ActiveRuneFocusId] = runeCharge
+	end
+
+	chargeByFocus = cloneFocusMap(chargeByFocus)
 
 	return {
 		FromUnix = math.min(capturedAt, now),
@@ -261,6 +265,12 @@ function AwayRewardProgress.captureInterval(profile, checkpoint, nowUnix)
 	end
 
 	if offer.ObservedMinutes >= 1 then
+		if typeof(awayRewards.Pending) ~= "table"
+			and awayRewards.NextSequence >= MAXIMUM_EXACT_INTEGER
+		then
+			return { Ok = false, Changed = false, Code = "away_sequence_exhausted" }
+		end
+
 		local pending = AwayRewardProgress.mergePending(awayRewards.Pending, offer)
 		pending.Sequence = if typeof(awayRewards.Pending) == "table"
 			then safeInteger(awayRewards.Pending.Sequence, awayRewards.NextSequence)
@@ -349,7 +359,24 @@ function AwayRewardProgress.resolve(profile, kind, sequence, context, applyRuneC
 	local chargeAppliedByFocus = cloneFocusMap(nil)
 	local levelsGainedByFocus = cloneFocusMap(nil)
 
+	if requestedSequence >= MAXIMUM_EXACT_INTEGER then
+		return { Ok = false, Changed = false, Code = "away_sequence_exhausted" }
+	end
+
 	if kind == "claimed" then
+		local hasRuneCharge = false
+
+		for _, focusId in ipairs(AwayRewardProgress.FocusIds) do
+			if safeInteger(pendingChargeByFocus[focusId], 0) > 0 then
+				hasRuneCharge = true
+				break
+			end
+		end
+
+		if hasRuneCharge and typeof(applyRuneCharge) ~= "function" then
+			return { Ok = false, Changed = false, Code = "away_rune_callback_required" }
+		end
+
 		essenceAwarded = math.min(
 			safeInteger(pending.PotentialEssence, 0),
 			math.max(0, currentCapacity - currentEssence)
