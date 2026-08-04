@@ -679,6 +679,19 @@ local function PetInventoryOverlayComponent(props)
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = 96,
 	})
+	contentChildren.EquipBest = React.createElement("TextButton", {
+		Active = true,
+		BackgroundColor3 = Color3.fromRGB(62, 176, 106),
+		BorderSizePixel = 0,
+		Position = UDim2.new(0.5, 92, 0, 8),
+		Size = UDim2.fromOffset(112, 44),
+		Font = UIThemeConfig.Font,
+		Text = "Equip Best",
+		TextColor3 = Color3.new(1, 1, 1),
+		TextSize = 14,
+		[React.Event.Activated] = resolvedProps.OnEquipBest,
+		ZIndex = 98,
+	})
 
 	contentChildren.BestGrid = createBestGrid(
 		bestPetStacks,

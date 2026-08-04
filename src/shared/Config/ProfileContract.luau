@@ -1,6 +1,6 @@
 local ProfileContract = {}
 
-ProfileContract.DataVersion = 8
+ProfileContract.DataVersion = 9
 ProfileContract.MinimumSupportedDataVersion = 5
 ProfileContract.MaximumExactInteger = 9_007_199_254_740_991
 ProfileContract.MaximumIdentifierLength = 128
@@ -156,6 +156,7 @@ ProfileContract.DurableRootOrder = {
 	"AwayRewards",
 	"Onboarding",
 	"Social",
+	"Retention",
 	"ProcessedPurchaseIds",
 	"ActiveBoosts",
 	"Potions",

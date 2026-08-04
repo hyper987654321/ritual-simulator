@@ -807,4 +807,20 @@ function ClientStateStore.updateGuidance(values)
 	return requestAction(Network.Actions.UpdateGuidance, values)
 end
 
+function ClientStateStore.setPetEquippedCount(petId, equippedCount)
+	return requestAction(Network.Actions.SetPetEquippedCount, { PetId = petId, EquippedCount = equippedCount })
+end
+
+function ClientStateStore.unequipPet(petId)
+	return requestAction(Network.Actions.UnequipPet, { PetId = petId })
+end
+
+function ClientStateStore.equipBestPets()
+	return requestAction(Network.Actions.EquipBestPets, {})
+end
+
+function ClientStateStore.claimRetention(retentionId)
+	return requestAction(Network.Actions.ClaimRetention, { RetentionId = retentionId })
+end
+
 return ClientStateStore

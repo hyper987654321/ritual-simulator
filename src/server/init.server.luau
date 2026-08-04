@@ -15,6 +15,7 @@ local Network = require(game:GetService("ReplicatedStorage"):WaitForChild("Share
 
 PetModelReplicationService.start()
 PlayerStateService.start()
+LeaderboardService.setRecordProvider(PlayerStateService.getCurrentLeaderboardRecords)
 local playerStateUpdated = Network.getRemoteEvent(Network.RemoteEvents.PlayerStateUpdated)
 local socialPresenceService = SocialPresenceService.new({
 	getProfile = PlayerStateService.getProfile,

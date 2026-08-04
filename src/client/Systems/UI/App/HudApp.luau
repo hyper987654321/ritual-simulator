@@ -17,6 +17,7 @@ local ZoneConfig = require(Config:WaitForChild("ZoneConfig"))
 local Systems = script.Parent.Parent.Parent
 local ClientUiSignals = require(Systems:WaitForChild("State"):WaitForChild("ClientUiSignals"))
 local ClientStateStore = require(Systems:WaitForChild("State"):WaitForChild("ClientStateStore"))
+local ProductPurchaseController = require(Systems:WaitForChild("Shop"):WaitForChild("ProductPurchaseController"))
 
 local Components = script.Parent.Parent:WaitForChild("Components")
 local CommonComponents = Components:WaitForChild("Common")
@@ -41,6 +42,8 @@ local GoalChip = require(HudComponents:WaitForChild("GoalChip"))
 local NotificationStack = require(HudComponents:WaitForChild("NotificationStack"))
 local DailyRewardOverlay = require(OverlayComponents:WaitForChild("DailyRewardOverlay"))
 local AwayRewardOverlay = require(OverlayComponents:WaitForChild("AwayRewardOverlay"))
+local RetentionOverlay = require(OverlayComponents:WaitForChild("RetentionOverlay"))
+local LeaderboardOverlay = require(OverlayComponents:WaitForChild("LeaderboardOverlay"))
 
 local Hooks = script.Parent.Parent:WaitForChild("Hooks")
 local useRollActions = require(Hooks:WaitForChild("useRollActions"))
@@ -55,6 +58,8 @@ local ASCENSION_OVERLAY_ID = "Ascension"
 local TELEPORT_OVERLAY_ID = "Teleport"
 local DAILY_OVERLAY_ID = "DailyReward"
 local AWAY_OVERLAY_ID = "AwayReward"
+local RETENTION_OVERLAY_ID = "Retention"
+local LEADERBOARD_OVERLAY_ID = "Leaderboard"
 
 local player = Players.LocalPlayer
 
@@ -205,6 +210,7 @@ local function HudApp()
 	local rollScreenOpen, setRollScreenOpen = React.useState(false)
 	local hideRollAnimation, setHideRollAnimation = React.useState(false)
 	local activeOverlay, setActiveOverlay = React.useState(nil)
+	local runServerAction
 	local tutorialStarted, setTutorialStarted = React.useState(false)
 	local currentTutorialStepId = TutorialOverlay.getCurrentStepId(snapshot)
 	local viewportSize = useViewportSize(HudLayoutConfig.DefaultViewportSize)
@@ -359,7 +365,19 @@ local function HudApp()
 		end)
 	end
 
-	local function runServerAction(action)
+	local function toggleRetentionOverlay()
+		setActiveOverlay(function(currentOverlay) return if currentOverlay == RETENTION_OVERLAY_ID then nil else RETENTION_OVERLAY_ID end)
+	end
+
+	local function toggleLeaderboardOverlay()
+		setActiveOverlay(function(currentOverlay) return if currentOverlay == LEADERBOARD_OVERLAY_ID then nil else LEADERBOARD_OVERLAY_ID end)
+	end
+
+	local function claimRetention(retentionId)
+		runServerAction(function() return ClientStateStore.claimRetention(retentionId) end)
+	end
+
+	runServerAction = function(action)
 		task.spawn(function()
 			local ok, result = pcall(action)
 
@@ -450,6 +468,10 @@ local function HudApp()
 		runServerAction(function()
 			return ClientStateStore.buyPotionWithGems(potionId)
 		end)
+	end
+
+	local function promptProduct(shopProductId)
+		runServerAction(function() return ProductPurchaseController.promptProduct(shopProductId) end)
 	end
 
 	local function selectRuneFocus(focusId)
@@ -551,6 +573,7 @@ local function HudApp()
 
 		ShopOverlay = if activeOverlay == SHOP_OVERLAY_ID and not rollScreenVisible
 			then ShopOverlay.create({
+				OnProductActivated = promptProduct,
 				Snapshot = snapshot,
 				OnBuyPotion = buyPotionWithGems,
 				OnClose = closeOverlay,
@@ -561,6 +584,7 @@ local function HudApp()
 
 		PetInventoryOverlay = if activeOverlay == PET_INVENTORY_OVERLAY_ID and not rollScreenVisible
 			then PetInventoryOverlay.create({
+				OnEquipBest = function() runServerAction(ClientStateStore.equipBestPets) end,
 				Snapshot = snapshot,
 				OnClose = closeOverlay,
 				ViewportSize = viewportSize,
@@ -622,6 +646,12 @@ local function HudApp()
 			then DailyRewardOverlay.create({ Snapshot = snapshot, OnClaim = claimDaily, OnClose = closeOverlay, ViewportSize = viewportSize })
 			else nil,
 
+		RetentionOverlay = if activeOverlay == RETENTION_OVERLAY_ID and not rollScreenVisible
+			then RetentionOverlay.create({ Snapshot = snapshot, OnClaim = claimRetention, OnClose = closeOverlay }) else nil,
+
+		LeaderboardOverlay = if activeOverlay == LEADERBOARD_OVERLAY_ID and not rollScreenVisible
+			then LeaderboardOverlay.create({ Snapshot = snapshot, OnClose = closeOverlay }) else nil,
+
 		RollScreenContent = if rollScreenVisible then RollScreenOverlay.create({
 			AutoRollEnabled = autoRollEnabled,
 			OnHide = hideRollScreen,
@@ -678,6 +708,16 @@ local function HudApp()
 				Name = "Teleport",
 				IconId = "Teleporter",
 				Activated = toggleTeleportOverlay,
+			},
+			{
+				Name = "Retention",
+				IconId = "RollDice",
+				Activated = toggleRetentionOverlay,
+			},
+			{
+				Name = "Boards",
+				IconId = "RollDice",
+				Activated = toggleLeaderboardOverlay,
 			},
 		}, {
 			AnchorPoint = HudLayoutConfig.RightHudActionAnchor,

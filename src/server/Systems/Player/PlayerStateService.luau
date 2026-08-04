@@ -16,6 +16,7 @@ local ShopProductConfig = require(Config:WaitForChild("ShopProductConfig"))
 local RitualStoneConfig = require(Config:WaitForChild("RitualStoneConfig"))
 local RuneFocusConfig = require(Config:WaitForChild("RuneFocusConfig"))
 local ZoneConfig = require(Config:WaitForChild("ZoneConfig"))
+local Network = require(Shared:WaitForChild("Net"):WaitForChild("Network"))
 local GeneratedMapRuntime = require(MapGen:WaitForChild("GeneratedMapRuntime"))
 local LeaderstatsService = require(script.Parent:WaitForChild("LeaderstatsService"))
 local ProfilePersistence = require(script.Parent:WaitForChild("ProfilePersistence"))
@@ -29,6 +30,9 @@ local RitualStoneProgress = require(script.Parent.Parent:WaitForChild("Ritual"):
 local DailyRewardProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("DailyRewardProgress"))
 local AwayRewardProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("AwayRewardProgress"))
 local OnboardingProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("OnboardingProgress"))
+local RetentionProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("RetentionProgress"))
+local PetInventoryProgress = require(script.Parent.Parent:WaitForChild("Pets"):WaitForChild("PetInventoryProgress"))
+local LeaderboardService = require(script.Parent.Parent:WaitForChild("Leaderboard"):WaitForChild("LeaderboardService"))
 
 local PlayerStateService = {}
 
@@ -42,6 +46,19 @@ local random = Random.new()
 local hasStarted = false
 local nextProfileLoadToken = 0
 local socialPresenceService = nil
+
+local function cloneValue(value)
+	if typeof(value) ~= "table" then return value end
+	local copy = {}
+	for key, child in pairs(value) do copy[key] = cloneValue(child) end
+	return copy
+end
+
+local function recordRetentionEvent(profile, eventId, amount)
+	if typeof(profile) == "table" then
+		RetentionProgress.recordEvent(profile, eventId, amount or 1, DateTime.now().UnixTimestamp)
+	end
+end
 
 local function cloneArray(array)
 	local clone = {}
@@ -568,6 +585,10 @@ local function collectCrystalRewardWithRush(profile, stats)
 	local rushPointsAwarded = 0
 
 	if breakResult.Finalized then
+		recordRetentionEvent(profile, "online_crystal_break", 1)
+		if (breakResult.RuneLevelsGained or 0) > 0 then
+			recordRetentionEvent(profile, "stone_or_rune_upgrade", breakResult.RuneLevelsGained)
+		end
 		rushPointsAwarded = awardCrystalBreakRush(profile, 1, breakResult.RuneLevelsGained or 0)
 		queueCapacityFullTransition(profile, wasFull)
 	end
@@ -1139,7 +1160,16 @@ function PlayerStateService.getSnapshot(player, expectedProfile)
 	if snapshot ~= nil and socialPresenceService ~= nil then
 		snapshot.Social = socialPresenceService:getSnapshot(player, profile)
 	end
+	if snapshot ~= nil then snapshot.Leaderboards = LeaderboardService.getSnapshot() end
 	return snapshot
+end
+
+function PlayerStateService.getCurrentLeaderboardRecords()
+	local records = {}
+	for player, record in pairs(profileRecordsByPlayer) do
+		table.insert(records, { Player = player, Profile = record.Profile, ProfileReady = true })
+	end
+	return records
 end
 
 function PlayerStateService.getPublicVisual(player, expectedProfile)
@@ -2012,6 +2042,7 @@ function PlayerStateService.rebirth(player)
 
 	local rebirthNowUnix = DateTime.now().UnixTimestamp
 	profile.Rebirths = addExactIntegers(profile.Rebirths, 1)
+	recordRetentionEvent(profile, "rebirth", 1)
 	completeOnboardingMilestone(profile, "first_rebirth")
 	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.Rebirth, 1, rebirthNowUnix)
 	local dailyBonus = DailyRewardProgress.grantFirstRebirthOfDay(profile, function(dailyProfile, source, count, capturedNow)
@@ -2134,6 +2165,7 @@ function PlayerStateService.ascend(player)
 	local starReward = AscensionConfig.getStarReward(currentAscensions)
 
 	profile.Ascensions = nextAscensions
+	recordRetentionEvent(profile, "ascension", 1)
 	profile.AscensionStars = addExactIntegers(profile.AscensionStars, starReward)
 	profile.Essence = 0
 	profile.CurrentZone = 1
@@ -2421,6 +2453,7 @@ function PlayerStateService.unlockZone(player, zoneId)
 
 	profile.Essence = getNonNegativeInteger(profile.Essence) - getNonNegativeInteger(zone.UnlockCost)
 	profile.UnlockedZones[zoneId] = true
+	recordRetentionEvent(profile, "zone_unlock", 1)
 
 	if zoneId == 2 then
 		completeOnboardingMilestone(profile, "zone_2_unlocked")
@@ -2568,6 +2601,7 @@ function PlayerStateService.rollPet(player)
 	end
 
 	local petInstance = addPet(profile, petId)
+	recordRetentionEvent(profile, "successful_pet_roll", 1)
 	RitualRushProgress.awardPoints(profile, RitualRushConfig.PointSources.RollPet)
 	local petFacts = PlayerDerivedState.getPetSnapshotFacts(
 		petId,
@@ -2629,8 +2663,66 @@ function PlayerStateService.buyStoneUpgrade(player, upgradeId)
 	completeOnboardingMilestone(profile, "first_stone_upgrade")
 
 	local _, updatedStats = PlayerDerivedState.getCurrentRitualRuntime(profile)
+	recordRetentionEvent(profile, "stone_or_rune_upgrade", result.LevelsBought or 1)
 	collectCrystalRewardWithRush(profile, updatedStats)
 
+	return result
+end
+
+function PlayerStateService.setPetEquippedCount(player, petId, equippedCount)
+	local profile = PlayerStateService.getProfile(player)
+	if profile == nil then return { Ok = false, Changed = false, Code = "profile_not_ready" } end
+	local result = PetInventoryProgress.setEquippedCount(profile, petId, equippedCount)
+	if result.Success ~= true then
+		return { Ok = false, Changed = false, Code = result.Reason or "pet_action_failed" }
+	end
+	CrystalCombat.clearAttackRuntimeForSlots(profile, result.ChangedSlotIndexes)
+	commitProgressRecords(profile)
+	return { Ok = true, Changed = #result.ChangedSlotIndexes > 0, Code = "pet_equipped", PetId = result.PetId, EquippedCount = result.EquippedCount }
+end
+
+function PlayerStateService.unequipPet(player, petId)
+	return PlayerStateService.setPetEquippedCount(player, petId, 0)
+end
+
+function PlayerStateService.equipBestPets(player)
+	local profile = PlayerStateService.getProfile(player)
+	if profile == nil then return { Ok = false, Changed = false, Code = "profile_not_ready" } end
+	local previous = cloneArray(profile.EquippedPetIds)
+	local result = PetInventoryProgress.equipBest(profile)
+	if result.Success ~= true then return { Ok = false, Changed = false, Code = result.Reason or "pet_action_failed" } end
+	local changedSlots = getChangedEquippedSlots(previous, profile.EquippedPetIds)
+	CrystalCombat.clearAttackRuntimeForSlots(profile, changedSlots)
+	commitProgressRecords(profile)
+	return { Ok = true, Changed = #changedSlots > 0, Code = "pets_equipped_best", EquippedPetIds = cloneArray(profile.EquippedPetIds) }
+end
+
+function PlayerStateService.claimRetention(player, retentionId)
+	local profile = PlayerStateService.getProfile(player)
+	if profile == nil then return { Ok = false, Changed = false, Code = "profile_not_ready" } end
+	local nowUnix = DateTime.now().UnixTimestamp
+	local beforeRetention = cloneValue(profile.Retention)
+	local beforePotions = cloneValue(profile.Potions)
+	local beforeGems = profile.RitualGems
+	local result = RetentionProgress.claim(profile, retentionId, nowUnix)
+	if result.Code == "claimed" then
+		commitProfileForPersistence(profile)
+		local saved = ProfilePersistence.saveConfirmed(player, profile, function(data)
+			local state = if typeof(data) == "table" and typeof(data.Retention) == "table" then data.Retention else nil
+			return state ~= nil and ((state.DailyClaimed and state.DailyClaimed[retentionId] == true)
+				or (state.PlaytimeClaimed and state.PlaytimeClaimed[retentionId] == true)
+				or (state.AchievementClaimed and state.AchievementClaimed[retentionId] == true))
+		end)
+		if saved ~= true then
+			profile.Retention = beforeRetention
+			profile.Potions = beforePotions
+			profile.RitualGems = beforeGems
+			return { Ok = false, Changed = false, Code = "save_failed", RetryAfter = 1 }
+		end
+	end
+	if result.Changed == true then
+		profile.SnapshotRevision = addExactIntegers(profile.SnapshotRevision, 1)
+	end
 	return result
 end
 
@@ -2885,6 +2977,7 @@ function PlayerStateService.start()
 	for _, player in ipairs(Players:GetPlayers()) do
 		queueProfileLoad(player)
 	end
+	local SnapshotPublisher = require(script.Parent:WaitForChild("SnapshotPublisher"))
 
 	task.spawn(function()
 		while hasStarted do
@@ -2902,6 +2995,25 @@ function PlayerStateService.start()
 					if not ok or synchronized ~= true then
 						warn("[PlayerStateService] Periodic profile synchronization failed")
 					end
+				end)
+			end
+		end
+	end)
+
+	task.spawn(function()
+		while hasStarted do
+			task.wait(30)
+			for player, record in pairs(profileRecordsByPlayer) do
+				task.spawn(function()
+					PlayerStateService.withProfileLock(player, function(profile)
+						if profile == nil or not PlayerStateService.isCurrentProfile(player, profile) then return end
+						local advanced = RetentionProgress.advanceActiveTime(profile, 30, DateTime.now().UnixTimestamp)
+						if advanced.Changed == true then
+							profile.SnapshotRevision = addExactIntegers(profile.SnapshotRevision, 1)
+							local remote = Network.getRemoteEvent(Network.RemoteEvents.PlayerStateUpdated)
+							SnapshotPublisher.publishPlayerStateUpdate(player, remote, { Retention = true })
+						end
+					end)
 				end)
 			end
 		end

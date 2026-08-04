@@ -40,6 +40,10 @@ Network.Actions = {
 	ClaimAwayRewards = "ClaimAwayRewards",
 	DismissAwayRewards = "DismissAwayRewards",
 	UpdateGuidance = "UpdateGuidance",
+	SetPetEquippedCount = "SetPetEquippedCount",
+	UnequipPet = "UnequipPet",
+	EquipBestPets = "EquipBestPets",
+	ClaimRetention = "ClaimRetention",
 }
 
 local function getFolder()

@@ -17,6 +17,7 @@ local CrystalCombat = require(script.Parent.Parent:WaitForChild("Ritual"):WaitFo
 local RuneFocusProgress = require(script.Parent.Parent:WaitForChild("Ritual"):WaitForChild("RuneFocusProgress"))
 local DailyRewardProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("DailyRewardProgress"))
 local OnboardingProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("OnboardingProgress"))
+local RetentionProgress = require(script.Parent.Parent:WaitForChild("Retention"):WaitForChild("RetentionProgress"))
 
 local PlayerDerivedState = {}
 
@@ -43,6 +44,7 @@ PlayerDerivedState.PlayerStateSectionAllowlist = {
 	Roll = true,
 	RitualRush = true,
 	DailyRewards = true,
+	Retention = true,
 	AwayRewards = true,
 	Onboarding = true,
 	Social = true,
@@ -673,6 +675,7 @@ function PlayerDerivedState.getSnapshot(profile)
 		Automation = getAutomationSnapshot(profile),
 		RitualRush = RitualRushConfig.getSnapshot(profile.RitualRush, serverNowUnix),
 		DailyRewards = getDailyRewardsSnapshot(profile, serverNowUnix),
+		Retention = RetentionProgress.buildSnapshot(profile, serverNowUnix),
 		AwayRewards = getAwayRewardsSnapshot(profile),
 		Onboarding = getOnboardingSnapshot(profile, {
 			Capacity = stats.Capacity,
@@ -937,6 +940,10 @@ function PlayerDerivedState.getCrystalUpdate(profile, requestedSections)
 
 	if sections.DailyRewards == true then
 		update.DailyRewards = getDailyRewardsSnapshot(profile, serverNowUnix)
+	end
+
+	if sections.Retention == true then
+		update.Retention = RetentionProgress.buildSnapshot(profile, serverNowUnix)
 	end
 
 	if sections.AwayRewards == true then

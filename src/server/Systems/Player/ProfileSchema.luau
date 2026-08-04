@@ -5,6 +5,7 @@ local Config = Shared:WaitForChild("Config")
 
 local PetConfig = require(Config:WaitForChild("PetConfig"))
 local ProfileContract = require(Config:WaitForChild("ProfileContract"))
+local RetentionConfig = require(Config:WaitForChild("RetentionConfig"))
 local ZoneConfig = require(Config:WaitForChild("ZoneConfig"))
 
 local ProfileSchema = {}
@@ -138,6 +139,18 @@ local function createSocial()
 	}
 end
 
+local function createRetention(nowUnix)
+	return {
+		Version = 1,
+		DayIndex = math.floor(getNowUnix(nowUnix) / RetentionConfig.SecondsPerDay),
+		DailyProgress = {},
+		DailyClaimed = {},
+		ActiveSecondsToday = 0,
+		PlaytimeClaimed = {},
+		AchievementClaimed = {},
+	}
+end
+
 local function isKnownFocusId(focusId)
 	return typeof(focusId) == "string" and ProfileContract.RuneFocusMaxLevels[focusId] ~= nil
 end
@@ -232,6 +245,7 @@ function ProfileSchema.createTemplate(nowUnix)
 		AwayRewards = nil,
 		Onboarding = createOnboarding(),
 		Social = createSocial(),
+		Retention = createRetention(nowUnix),
 		ProcessedPurchaseIds = {},
 		ActiveBoosts = {},
 		Potions = {},
@@ -405,6 +419,10 @@ function ProfileSchema.migrateBeforeReconcile(data, nowUnix)
 
 	if working.Social == nil then
 		working.Social = createSocial()
+	end
+
+	if working.Retention == nil then
+		working.Retention = createRetention(nowUnix)
 	end
 
 	return working, nil, version
@@ -734,6 +752,31 @@ local function normalizeOnboarding(onboarding)
 	}
 end
 
+local function normalizeRetention(retention, nowUnix)
+	local source = if typeof(retention) == "table" then retention else {}
+	local today = math.floor(getNowUnix(nowUnix) / RetentionConfig.SecondsPerDay)
+	local sourceDay = getInteger(source.DayIndex, 0, ProfileContract.MaximumExactInteger, today)
+	local normalized = createRetention(nowUnix)
+	if sourceDay ~= today then
+		return normalized
+	end
+	normalized.DayIndex = sourceDay
+	normalized.ActiveSecondsToday = getNonNegativeInteger(source.ActiveSecondsToday)
+	for _, id in ipairs(RetentionConfig.DeedOrder) do
+		local definition = RetentionConfig.Deeds[id]
+		local progress = getInteger(typeof(source.DailyProgress) == "table" and source.DailyProgress[id] or 0, 0, definition.Requirement, 0)
+		if progress > 0 then normalized.DailyProgress[id] = progress end
+		normalized.DailyClaimed[id] = typeof(source.DailyClaimed) == "table" and source.DailyClaimed[id] == true or false
+	end
+	for _, id in ipairs(RetentionConfig.PlaytimeOrder) do
+		normalized.PlaytimeClaimed[id] = typeof(source.PlaytimeClaimed) == "table" and source.PlaytimeClaimed[id] == true or false
+	end
+	for _, id in ipairs(RetentionConfig.AchievementOrder) do
+		normalized.AchievementClaimed[id] = typeof(source.AchievementClaimed) == "table" and source.AchievementClaimed[id] == true or false
+	end
+	return normalized
+end
+
 local function normalizeProcessedPurchaseIds(receipts)
 	local normalized = {}
 
@@ -880,6 +923,7 @@ function ProfileSchema.normalizeDurable(data, nowUnix)
 		Version = 1,
 		FirstCoPlayRewarded = typeof(source.Social) == "table" and source.Social.FirstCoPlayRewarded == true,
 	}
+	normalized.Retention = normalizeRetention(source.Retention, nowUnix)
 	normalized.ProcessedPurchaseIds = normalizeProcessedPurchaseIds(source.ProcessedPurchaseIds)
 	normalized.ActiveBoosts = normalizeActiveBoosts(source.ActiveBoosts, nowUnix)
 	normalized.Potions = normalizePotions(source.Potions)

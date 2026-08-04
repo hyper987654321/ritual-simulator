@@ -48,6 +48,15 @@ local function getStrictScalarPayload(payload, key, expectedType)
 	return if typeof(value) == expectedType then value else nil
 end
 
+local function getStrictPetPayload(payload)
+	if typeof(payload) ~= "table" then return nil, nil end
+	for key in pairs(payload) do
+		if key ~= "PetId" and key ~= "EquippedCount" then return nil, nil end
+	end
+	return if typeof(payload.PetId) == "string" then payload.PetId else nil,
+		if typeof(payload.EquippedCount) == "number" then payload.EquippedCount else nil
+end
+
 local actionHandlers = {
 	[Network.Actions.RollPet] = function(player)
 		return PlayerStateService.rollPet(player)
@@ -131,6 +140,21 @@ local actionHandlers = {
 
 	[Network.Actions.UpdateGuidance] = function(player, payload)
 		return PlayerStateService.updateGuidance(player, payload)
+	end,
+
+	[Network.Actions.SetPetEquippedCount] = function(player, payload)
+		local petId, equippedCount = getStrictPetPayload(payload)
+		return PlayerStateService.setPetEquippedCount(player, petId, equippedCount)
+	end,
+	[Network.Actions.UnequipPet] = function(player, payload)
+		return PlayerStateService.unequipPet(player, getStrictScalarPayload(payload, "PetId", "string"))
+	end,
+	[Network.Actions.EquipBestPets] = function(player, payload)
+		if typeof(payload) == "table" and next(payload) ~= nil then return { Ok = false, Changed = false, Code = "invalid_payload" } end
+		return PlayerStateService.equipBestPets(player)
+	end,
+	[Network.Actions.ClaimRetention] = function(player, payload)
+		return PlayerStateService.claimRetention(player, getStrictScalarPayload(payload, "RetentionId", "string"))
 	end,
 }
 
@@ -258,6 +282,7 @@ local function processAction(player, actionName, payload)
 		or actionName == Network.Actions.ClaimAwayRewards
 		or actionName == Network.Actions.DismissAwayRewards
 		or actionName == Network.Actions.UpdateGuidance
+		or actionName == Network.Actions.ClaimRetention
 	then
 		local featureRateLimitedResponse = getRateLimitedResponse(player, "Retention", FEATURE_RATE_LIMIT)
 
