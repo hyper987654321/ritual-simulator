@@ -5,6 +5,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 
 local PetConfig = require(Config:WaitForChild("PetConfig"))
+local PetPresentationResolver = require(script.Parent:WaitForChild("PetPresentation"):WaitForChild("Resolver"))
 
 local PetModelReplicationService = {}
 
@@ -63,7 +64,11 @@ local function publishPetModels()
 	local requiredBasePetIds, requiredByBasePetId = getRequiredBasePetIds()
 
 	if sourceFolder == nil then
-		warn("ServerStorage.PetModels is missing; equipped pet models will not render.")
+		warn("ServerStorage.PetModels is missing; using code-native pet placeholders.")
+		for _, basePetId in ipairs(requiredBasePetIds) do
+			local resolvedModel = PetPresentationResolver.resolve(basePetId, PetConfig.getBasePet(basePetId), nil)
+			resolvedModel.Parent = replicatedFolder
+		end
 		replaceReplicatedFolder(replicatedFolder)
 		return
 	end
@@ -72,18 +77,13 @@ local function publishPetModels()
 		local sourceModel = sourceFolder:FindFirstChild(basePetId)
 
 		if sourceModel == nil then
-			warn("Missing required pet model template in ServerStorage.PetModels:", basePetId)
+			warn("Missing required pet model template; using code-native placeholder:", basePetId)
 		elseif not sourceModel:IsA("Model") then
-			warn("Skipping required pet visual template because it is not a Model:", sourceModel:GetFullName())
-		else
-			local clonedModel = sourceModel:Clone()
-
-			if clonedModel ~= nil then
-				clonedModel.Parent = replicatedFolder
-			else
-				warn("Skipping required pet visual template because it could not be cloned:", sourceModel:GetFullName())
-			end
+			warn("Invalid required pet visual template; using code-native placeholder:", sourceModel:GetFullName())
 		end
+
+		local resolvedModel = PetPresentationResolver.resolve(basePetId, PetConfig.getBasePet(basePetId), sourceModel)
+		resolvedModel.Parent = replicatedFolder
 	end
 
 	warnUnusedSourceChildren(sourceFolder, requiredByBasePetId)
