@@ -22,10 +22,23 @@ function DailyRewardOverlay.create(props)
 		})
 	end
 	local height = if mobile then math.min(560, math.max(360, viewport.Y - 32)) else 300
+	local daysProps = {
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(22, 118),
+		Size = UDim2.new(1, -44, 0, if mobile then height - 194 else 86),
+		ZIndex = 82,
+	}
+	if mobile then
+		daysProps.Active = true
+		daysProps.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		daysProps.CanvasSize = UDim2.new()
+		daysProps.ScrollBarThickness = 5
+	end
 	return Kit.modal({ Title = "Daily Rewards", BackgroundId = "RitualCore", MaximumWidth = 620, MaximumHeight = height, ViewportSize = viewport, ZIndex = 80, OnClose = props.OnClose, Children = {
 		Icon = Kit.icon("RitualCore", { Position = UDim2.new(1, -96, 0, 20), Size = UDim2.fromOffset(36, 36), ZIndex = 82 }),
 		Hint = Kit.label(if daily.IsClaimedToday then "Today's blessing is already claimed." else "Return each day to build a seven-day streak.", { Position = UDim2.fromOffset(22, 78), Size = UDim2.new(1, -44, 0, 32), TextColor3 = C.Muted, TextSize = 14, ZIndex = 82 }),
-		Days = React.createElement(if mobile then "ScrollingFrame" else "Frame", { Active = mobile, AutomaticCanvasSize = if mobile then Enum.AutomaticSize.Y else Enum.AutomaticSize.None, BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(), Position = UDim2.fromOffset(22, 118), ScrollBarThickness = 5, Size = UDim2.new(1, -44, 0, if mobile then height - 194 else 86), ZIndex = 82 }, cells),
+		Days = React.createElement(if mobile then "ScrollingFrame" else "Frame", daysProps, cells),
 		CloseAction = Kit.button("Close", { Position = UDim2.fromOffset(22, height - 62), Size = UDim2.fromOffset(108, 44), ZIndex = 83, [React.Event.Activated] = props.OnClose }),
 		Claim = Kit.button(if daily.IsClaimedToday then "Claimed" else "Claim Reward", { Active = daily.CanClaim == true, BackgroundColor3 = if daily.CanClaim then C.Action else C.Locked, Position = UDim2.new(1, -166, 1, -62), Size = UDim2.fromOffset(144, 44), ZIndex = 83, [React.Event.Activated] = if daily.CanClaim then function() props.OnClaim(daily.DayIndex) end else nil }),
 	}})
