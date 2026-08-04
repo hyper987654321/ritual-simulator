@@ -44,6 +44,7 @@ local DailyRewardOverlay = require(OverlayComponents:WaitForChild("DailyRewardOv
 local AwayRewardOverlay = require(OverlayComponents:WaitForChild("AwayRewardOverlay"))
 local RetentionOverlay = require(OverlayComponents:WaitForChild("RetentionOverlay"))
 local LeaderboardOverlay = require(OverlayComponents:WaitForChild("LeaderboardOverlay"))
+local SocialOverlay = require(OverlayComponents:WaitForChild("SocialOverlay"))
 
 local Hooks = script.Parent.Parent:WaitForChild("Hooks")
 local useRollActions = require(Hooks:WaitForChild("useRollActions"))
@@ -60,6 +61,7 @@ local DAILY_OVERLAY_ID = "DailyReward"
 local AWAY_OVERLAY_ID = "AwayReward"
 local RETENTION_OVERLAY_ID = "Retention"
 local LEADERBOARD_OVERLAY_ID = "Leaderboard"
+local SOCIAL_OVERLAY_ID = "Social"
 
 local player = Players.LocalPlayer
 
@@ -373,6 +375,12 @@ local function HudApp()
 		setActiveOverlay(function(currentOverlay) return if currentOverlay == LEADERBOARD_OVERLAY_ID then nil else LEADERBOARD_OVERLAY_ID end)
 	end
 
+	local function toggleSocialOverlay()
+		setActiveOverlay(function(currentOverlay)
+			return if currentOverlay == SOCIAL_OVERLAY_ID then nil else SOCIAL_OVERLAY_ID
+		end)
+	end
+
 	local function claimRetention(retentionId)
 		runServerAction(function() return ClientStateStore.claimRetention(retentionId) end)
 	end
@@ -585,6 +593,8 @@ local function HudApp()
 		PetInventoryOverlay = if activeOverlay == PET_INVENTORY_OVERLAY_ID and not rollScreenVisible
 			then PetInventoryOverlay.create({
 				OnEquipBest = function() runServerAction(ClientStateStore.equipBestPets) end,
+				OnSetEquippedCount = function(petId, count) runServerAction(function() return ClientStateStore.setPetEquippedCount(petId, count) end) end,
+				OnUnequip = function(petId) runServerAction(function() return ClientStateStore.unequipPet(petId) end) end,
 				Snapshot = snapshot,
 				OnClose = closeOverlay,
 				ViewportSize = viewportSize,
@@ -652,6 +662,9 @@ local function HudApp()
 		LeaderboardOverlay = if activeOverlay == LEADERBOARD_OVERLAY_ID and not rollScreenVisible
 			then LeaderboardOverlay.create({ Snapshot = snapshot, OnClose = closeOverlay }) else nil,
 
+		SocialOverlay = if activeOverlay == SOCIAL_OVERLAY_ID and not rollScreenVisible
+			then SocialOverlay.create({ Snapshot = snapshot, OnClose = closeOverlay, ViewportSize = viewportSize }) else nil,
+
 		RollScreenContent = if rollScreenVisible then RollScreenOverlay.create({
 			AutoRollEnabled = autoRollEnabled,
 			OnHide = hideRollScreen,
@@ -718,6 +731,12 @@ local function HudApp()
 				Name = "Boards",
 				IconId = "RollDice",
 				Activated = toggleLeaderboardOverlay,
+			},
+			{
+				Name = "Social",
+				IconId = "PetInventory",
+				LabelText = "Friends",
+				Activated = toggleSocialOverlay,
 			},
 		}, {
 			AnchorPoint = HudLayoutConfig.RightHudActionAnchor,
