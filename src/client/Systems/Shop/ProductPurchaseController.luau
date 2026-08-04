@@ -12,12 +12,15 @@ ProductPurchaseController.ResultStatus = {
 	Prompted = "prompted",
 	Busy = "busy",
 	LocalUnavailable = "local_unavailable",
+	PromptFailed = "prompt_failed",
 	Completed = "completed",
 	Cancelled = "cancelled",
 }
 
 local promptFinishedConnection = nil
 local inFlightProductId = nil
+local lastResult = nil
+local resultSubscriber = nil
 
 local function result(status, shopProductId)
 	return {
@@ -25,6 +28,35 @@ local function result(status, shopProductId)
 		Status = status,
 		ShopProductId = shopProductId,
 	}
+end
+
+local function publishResult(purchaseResult)
+	lastResult = purchaseResult
+
+	local subscriber = resultSubscriber
+
+	if subscriber ~= nil then
+		pcall(subscriber, purchaseResult)
+	end
+
+	return purchaseResult
+end
+
+local function isLuckProduct(product)
+	if typeof(product) ~= "table" then
+		return false
+	end
+
+	if product.ShopProductId == "boost_luck_2x_15m" then
+		return true
+	end
+
+	local grant = product.Grant
+	local boost = if typeof(grant) == "table" then grant.Boost else nil
+
+	return typeof(boost) == "table"
+		and product.ProductType == ShopProductConfig.ProductTypes.Boost
+		and boost.BoostId == ShopProductConfig.BoostIds.LuckMultiplier
 end
 
 local function clearInFlight()
@@ -47,10 +79,10 @@ local function onPromptFinished(playerId, robloxProductId, isPurchased)
 
 	-- A receipt is authoritative on the server. This only reports prompt state.
 	if isPurchased then
-		return result(ProductPurchaseController.ResultStatus.Completed, shopProductId)
+		return publishResult(result(ProductPurchaseController.ResultStatus.Completed, shopProductId))
 	end
 
-	return result(ProductPurchaseController.ResultStatus.Cancelled, shopProductId)
+	return publishResult(result(ProductPurchaseController.ResultStatus.Cancelled, shopProductId))
 end
 
 function ProductPurchaseController.start()
@@ -63,18 +95,24 @@ end
 
 function ProductPurchaseController.promptProduct(shopProductId)
 	if typeof(shopProductId) ~= "string" then
-		return result(ProductPurchaseController.ResultStatus.LocalUnavailable)
+		return publishResult(result(ProductPurchaseController.ResultStatus.LocalUnavailable))
 	end
 
 	if inFlightProductId ~= nil then
-		return result(ProductPurchaseController.ResultStatus.Busy, shopProductId)
+		return publishResult(result(ProductPurchaseController.ResultStatus.Busy, shopProductId))
 	end
 
 	local product = ShopProductConfig.getProduct(shopProductId)
 	local robloxProductId = ShopProductConfig.getRobloxProductId(product)
 
-	if product == nil or robloxProductId == nil then
-		return result(ProductPurchaseController.ResultStatus.LocalUnavailable, shopProductId)
+	if product == nil or robloxProductId == nil or isLuckProduct(product) then
+		return publishResult(result(ProductPurchaseController.ResultStatus.LocalUnavailable, shopProductId))
+	end
+
+	local localPlayer = Players.LocalPlayer
+
+	if localPlayer == nil then
+		return publishResult(result(ProductPurchaseController.ResultStatus.LocalUnavailable, shopProductId))
 	end
 
 	ProductPurchaseController.start()
@@ -83,9 +121,17 @@ function ProductPurchaseController.promptProduct(shopProductId)
 		RobloxProductId = robloxProductId,
 	}
 
-	MarketplaceService:PromptProductPurchase(Players.LocalPlayer, robloxProductId)
+	local promptSucceeded = pcall(function()
+		MarketplaceService:PromptProductPurchase(localPlayer, robloxProductId)
+	end)
 
-	return result(ProductPurchaseController.ResultStatus.Prompted, product.ShopProductId)
+	if not promptSucceeded then
+		clearInFlight()
+
+		return publishResult(result(ProductPurchaseController.ResultStatus.PromptFailed, product.ShopProductId))
+	end
+
+	return publishResult(result(ProductPurchaseController.ResultStatus.Prompted, product.ShopProductId))
 end
 
 function ProductPurchaseController.getInFlightProductId()
@@ -96,12 +142,31 @@ function ProductPurchaseController.getInFlightProductId()
 	return inFlightProductId.ShopProductId
 end
 
+function ProductPurchaseController.subscribe(callback)
+	if typeof(callback) ~= "function" then
+		return function() end
+	end
+
+	resultSubscriber = callback
+
+	return function()
+		if resultSubscriber == callback then
+			resultSubscriber = nil
+		end
+	end
+end
+
+function ProductPurchaseController.getLastResult()
+	return lastResult
+end
+
 function ProductPurchaseController.cleanup()
 	if promptFinishedConnection ~= nil then
 		promptFinishedConnection:Disconnect()
 		promptFinishedConnection = nil
 	end
 
+	resultSubscriber = nil
 	clearInFlight()
 end
 
