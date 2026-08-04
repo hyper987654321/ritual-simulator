@@ -1,0 +1,15 @@
+{
+  "name": "Ritual Simulator UI Lab",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Packages": { "$path": "Packages" },
+      "UILab": { "$path": "tools/ui-lab/shared" }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "UILabClient": { "$path": "tools/ui-lab/client" }
+      }
+    }
+  }
+}
