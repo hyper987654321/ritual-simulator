@@ -5,9 +5,11 @@ local HudController = require(Systems:WaitForChild("UI"):WaitForChild("HudContro
 local ReplicatedPlayerVisualController = require(Systems:WaitForChild("World"):WaitForChild("ReplicatedPlayerVisualController"))
 local WorldController = require(Systems:WaitForChild("World"):WaitForChild("WorldController"))
 local ProductPurchaseController = require(Systems:WaitForChild("Shop"):WaitForChild("ProductPurchaseController"))
+local PresentationController = require(Systems:WaitForChild("Presentation"):WaitForChild("PresentationController"))
 
 WorldController.start()
 ProductPurchaseController.start()
 RitualStoneVisualController.start()
 ReplicatedPlayerVisualController.start()
 HudController.start()
+PresentationController.start()
