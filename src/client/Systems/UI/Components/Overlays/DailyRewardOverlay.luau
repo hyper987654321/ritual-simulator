@@ -26,7 +26,7 @@ function DailyRewardOverlay.create(props)
 	local claimDay = daily.ClaimCycleDay or 1
 	for day = 1, 7 do
 		local reward = daily.CycleRewards and daily.CycleRewards[day] or 0
-		local claimed = day < claimDay
+		local claimed = day < claimDay or (day == claimDay and daily.IsClaimedToday == true)
 		local isCurrent = day == claimDay and not claimed
 		local locked = day > claimDay
 		days["Day" .. day] = Kit.button("", { Active = false, AutoButtonColor = false, BackgroundColor3 = if claimed then C.Success elseif isCurrent then C.Violet elseif locked then C.Panel else C.Card, BackgroundTransparency = if locked then 0.35 else 0, LayoutOrder = day, Text = "", ZIndex = 83 }, {

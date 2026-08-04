@@ -72,11 +72,11 @@ local function primitive(iconId, color)
 		children.Right = dot(color, UDim2.fromScale(0.5, 0.18), UDim2.fromScale(0.3, 0.3))
 		children.LeftBody = frame({ BackgroundColor3 = color, Position = UDim2.fromScale(0.12, 0.5), Size = UDim2.fromScale(0.44, 0.32) }, { Corner = corner(6) })
 		children.RightBody = frame({ BackgroundColor3 = color, Position = UDim2.fromScale(0.44, 0.5), Size = UDim2.fromScale(0.44, 0.32) }, { Corner = corner(6) })
-	elseif iconId == "AutoRoll" then
+	elseif iconId == "AutoRoll" or iconId == "AutoRollColored" then
 		children.A = bar(color, UDim2.fromScale(0.12, 0.44), UDim2.fromScale(0.62, 0.1), -35)
 		children.B = bar(color, UDim2.fromScale(0.28, 0.2), UDim2.fromScale(0.1, 0.6), 55)
 		children.C = bar(color, UDim2.fromScale(0.28, 0.44), UDim2.fromScale(0.62, 0.1), 145)
-	elseif iconId == "Rebirth" then
+	elseif iconId == "Rebirth" or iconId == "RollViewHidden" then
 		children.Outer = ring(color, UDim2.fromScale(0.16, 0.16), UDim2.fromScale(0.68, 0.68), 2)
 		children.Arrow = bar(color, UDim2.fromScale(0.43, 0.08), UDim2.fromScale(0.14, 0.42), 0)
 		children.Head = bar(color, UDim2.fromScale(0.32, 0.08), UDim2.fromScale(0.36, 0.12), 0)

@@ -226,7 +226,7 @@ local function createCompactStatus(snapshot, zoneName)
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 59,
 		}),
-		Gems = HudPrimitives.createLabel("✦  " .. NumberFormatter.compact(snapshot.RitualGems or 0), {
+		Gems = HudPrimitives.createLabel("GEMS  " .. NumberFormatter.compact(snapshot.RitualGems or 0), {
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.new(1, -14, 0, 25),
 			Size = UDim2.fromOffset(105, 27),
@@ -246,10 +246,10 @@ local function createRuneHint(snapshot)
 
 	local text = if runeFocus.IsUnlocked ~= true
 		then string.format("Rune Focus unlocks at Zone %d", runeFocus.RequiredZone or 3)
-		elseif runeFocus.ActiveId == nil then "Rune Focus available — choose a path in Ritual"
+		elseif runeFocus.ActiveId == nil then "Rune Focus available - choose a path in Ritual"
 		else "Rune Focus charges from crystal breaks"
 
-	return HudPrimitives.createLabel("ᛉ  " .. text, {
+	return HudPrimitives.createLabel("RUNE  " .. text, {
 		AnchorPoint = Vector2.new(0.5, 0),
 		BackgroundColor3 = Color3.fromRGB(27, 23, 47),
 		BackgroundTransparency = 0.12,
