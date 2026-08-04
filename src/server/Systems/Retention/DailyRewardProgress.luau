@@ -177,7 +177,7 @@ function DailyRewardProgress.claim(profile, requestedDayIndex, serverNowUnix)
 	}
 end
 
-function DailyRewardProgress.grantFirstRebirthOfDay(profile, serverNowUnix)
+function DailyRewardProgress.grantFirstRebirthOfDay(profile, applyRushSource, serverNowUnix)
 	local nowUnix = getServerNowUnix(serverNowUnix)
 	local dayIndex = getDayIndex(nowUnix)
 	local daily = normalizeDailyState(profile, dayIndex)
@@ -195,23 +195,23 @@ function DailyRewardProgress.grantFirstRebirthOfDay(profile, serverNowUnix)
 		}
 	end
 
-	local ritualRush = if typeof(profile.RitualRush) == "table" then profile.RitualRush else {}
-	local sourcePoints = if typeof(ritualRush.SourcePoints) == "table" then ritualRush.SourcePoints else {}
-	local currentRushPoints = clampInteger(
-		sourcePoints[DailyRewardProgress.FirstRebirthRushSource],
+	if typeof(applyRushSource) ~= "function" then
+		return {
+			Ok = false,
+			Changed = false,
+			Code = "rush_integration_required",
+		}
+	end
+
+	local rushAwarded = clampInteger(
+		applyRushSource(profile, DailyRewardProgress.FirstRebirthRushSource, 1, nowUnix),
 		0,
 		DailyRewardProgress.FirstRebirthRushReward,
 		0
 	)
-	local rushAwarded = DailyRewardProgress.FirstRebirthRushReward - currentRushPoints
 
 	daily.FirstRebirthRewardDay = dayIndex
 	profile.RitualGems = addBounded(profile.RitualGems, DailyRewardProgress.FirstRebirthGemReward)
-	ritualRush.Version = 1
-	ritualRush.SourcePoints = sourcePoints
-	ritualRush.SourcePoints[DailyRewardProgress.FirstRebirthRushSource] = DailyRewardProgress.FirstRebirthRushReward
-	ritualRush.Points = addBounded(ritualRush.Points, rushAwarded)
-	profile.RitualRush = ritualRush
 
 	return {
 		Ok = true,
