@@ -2,9 +2,17 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local React = require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("React"))
 local Kit = require(script.Parent:WaitForChild("OverlayKit"))
 local Theme = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("UIThemeConfig"))
+local NumberFormatter = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Util"):WaitForChild("NumberFormatter"))
 
 local DailyRewardOverlay = {}
 local C = Theme.Colors
+
+local function rewardText(value)
+	if typeof(value) == "number" then
+		return NumberFormatter.compact(value) .. " GEMS"
+	end
+	return "Reward"
+end
 
 function DailyRewardOverlay.create(props)
 	local daily = (props.Snapshot and props.Snapshot.DailyRewards) or {}
@@ -15,15 +23,16 @@ function DailyRewardOverlay.create(props)
 		Subtitle = Kit.label(if daily.IsClaimedToday then "Today's reward is claimed. Come back tomorrow." else "Claim one reward each day to build your streak.", { Position = UDim2.fromOffset(16, 64), Size = UDim2.new(1, -32, 0, 24), TextColor3 = C.Muted, TextSize = Theme.Type.Label, ZIndex = 82 }),
 		Days = nil,
 	}
+	local claimDay = daily.ClaimCycleDay or 1
 	for day = 1, 7 do
 		local reward = daily.CycleRewards and daily.CycleRewards[day] or 0
-		local isCurrent = day == daily.ClaimCycleDay
-		local claimed = isCurrent and daily.IsClaimedToday == true
-		local locked = day > (daily.ClaimCycleDay or 1) and not claimed
+		local claimed = day < claimDay
+		local isCurrent = day == claimDay and not claimed
+		local locked = day > claimDay
 		days["Day" .. day] = Kit.button("", { Active = false, AutoButtonColor = false, BackgroundColor3 = if claimed then C.Success elseif isCurrent then C.Violet elseif locked then C.Panel else C.Card, BackgroundTransparency = if locked then 0.35 else 0, LayoutOrder = day, Text = "", ZIndex = 83 }, {
 			Day = Kit.label("DAY " .. day, { Position = UDim2.fromOffset(4, 7), Size = UDim2.new(1, -8, 0, 18), TextColor3 = if locked then C.Muted else C.Ink, TextSize = Theme.Type.Caption, TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 84 }),
-			Reward = Kit.label(if claimed then "CLAIMED" elseif locked then "LOCKED" else tostring(reward) .. " GEMS", { Position = UDim2.fromOffset(4, 30), Size = UDim2.new(1, -8, 0, 28), TextColor3 = if locked then C.Muted else C.Gold, TextSize = Theme.Type.Label, TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 84 }),
-			State = if isCurrent and not claimed then Kit.label("TODAY", { Position = UDim2.new(0, 4, 1, -22), Size = UDim2.new(1, -8, 0, 18), TextColor3 = C.Cyan, TextSize = Theme.Type.Caption, TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 84 }) else nil,
+			Reward = Kit.label(if claimed then "CLAIMED" elseif locked then "LOCKED" else rewardText(reward), { Position = UDim2.fromOffset(4, 30), Size = UDim2.new(1, -8, 0, 28), TextColor3 = if locked then C.Muted else C.Gold, TextSize = Theme.Type.Label, TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 84 }),
+			State = if isCurrent and daily.IsClaimedToday ~= true then Kit.label("TODAY", { Position = UDim2.new(0, 4, 1, -22), Size = UDim2.new(1, -8, 0, 18), TextColor3 = C.Cyan, TextSize = Theme.Type.Caption, TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 84 }) else nil,
 		})
 	end
 	children.Days = React.createElement("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 104), Size = UDim2.new(1, -32, 0, if mobile then 264 else 104), ZIndex = 82 }, days)
