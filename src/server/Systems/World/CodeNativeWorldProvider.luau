@@ -82,8 +82,8 @@ local function buildZone(root, zoneId, zonesRoot, anchorsRoot)
 	local wallY = originY + WALL_HEIGHT / 2
 	local halfX = bounds.Size.X / 2
 	local halfZ = bounds.Size.Z / 2
-	makeHorizontalPerimeter(collision, "PerimeterNorth", Vector3.new(bounds.Center.X, wallY, bounds.Center.Z - halfZ), bounds.Size.X, zoneId > 1)
-	makeHorizontalPerimeter(collision, "PerimeterSouth", Vector3.new(bounds.Center.X, wallY, bounds.Center.Z + halfZ), bounds.Size.X, zoneId < RitualWorldContract.ZoneCount)
+	makeHorizontalPerimeter(collision, "PerimeterNorth", Vector3.new(bounds.Center.X, wallY, bounds.Center.Z - halfZ), bounds.Size.X, zoneId < RitualWorldContract.ZoneCount)
+	makeHorizontalPerimeter(collision, "PerimeterSouth", Vector3.new(bounds.Center.X, wallY, bounds.Center.Z + halfZ), bounds.Size.X, zoneId > 1)
 	makePart(collision, "PerimeterEast", CFrame.new(bounds.Center.X + halfX, wallY, bounds.Center.Z), Vector3.new(WALL_THICKNESS, WALL_HEIGHT, bounds.Size.Z), { CanTouch = false })
 	makePart(collision, "PerimeterWest", CFrame.new(bounds.Center.X - halfX, wallY, bounds.Center.Z), Vector3.new(WALL_THICKNESS, WALL_HEIGHT, bounds.Size.Z), { CanTouch = false })
 
