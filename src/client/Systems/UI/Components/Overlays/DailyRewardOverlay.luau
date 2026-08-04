@@ -1,47 +1,34 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local React = require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("React"))
-local HudPrimitives = require(script.Parent.Parent.Parent:WaitForChild("Components"):WaitForChild("Common"):WaitForChild("HudPrimitives"))
+local Kit = require(script.Parent:WaitForChild("OverlayKit"))
+local Config = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config")
+local Theme = require(Config:WaitForChild("UIThemeConfig"))
 
 local DailyRewardOverlay = {}
+local C = Theme.Colors
 
 function DailyRewardOverlay.create(props)
-	local daily = props.Snapshot.DailyRewards or {}
+	local daily = (props.Snapshot and props.Snapshot.DailyRewards) or {}
 	local viewport = props.ViewportSize or Vector2.new(1280, 720)
 	local mobile = viewport.X < 600
-	local cells = {}
+	local cells = { Layout = React.createElement("UIListLayout", { FillDirection = if mobile then Enum.FillDirection.Vertical else Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }) }
 	for day = 1, 7 do
 		local reward = daily.CycleRewards and daily.CycleRewards[day] or 0
-		cells["Day" .. day] = HudPrimitives.createLabel(string.format("%d\n%d Gems", day, reward), {
-			BackgroundColor3 = if day == daily.ClaimCycleDay then Color3.fromRGB(104, 75, 255) else Color3.fromRGB(45, 43, 60),
-			BackgroundTransparency = 0,
-			Size = if mobile then UDim2.new(1, 0, 0, 44) else UDim2.new(1 / 7, -4, 0, 54),
-			TextXAlignment = Enum.TextXAlignment.Center,
-			TextSize = if mobile then 14 else 12,
-			ZIndex = 82,
+		local claimed = daily.IsClaimedToday and day == daily.ClaimCycleDay
+		cells["Day" .. day] = React.createElement("Frame", { BackgroundColor3 = if day == daily.ClaimCycleDay then C.Action else C.Card, BorderSizePixel = 0, LayoutOrder = day, Size = if mobile then UDim2.new(1, 0, 0, 48) else UDim2.new(1 / 7, -7, 0, 78) }, {
+			Corner = React.createElement("UICorner", { CornerRadius = UDim.new(0, 10) }),
+			Day = Kit.label("DAY " .. day, { Position = UDim2.fromOffset(8, 7), Size = UDim2.new(1, -16, 0, 20), TextColor3 = C.Muted, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Center }),
+			Reward = Kit.label(tostring(reward) .. " Gems", { Position = UDim2.fromOffset(5, 28), Size = UDim2.new(1, -10, 0, 30), TextColor3 = if claimed then C.Success else C.Ink, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Center }),
 		})
 	end
-	local width = math.min(560, math.max(260, viewport.X - 24))
-	cells.Layout = React.createElement("UIListLayout", { FillDirection = if mobile then Enum.FillDirection.Vertical else Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder })
-	local panelHeight = if mobile then math.min(600, math.max(320, viewport.Y - 24)) else 190
-	local cellHeight = if mobile then panelHeight - 126 else 54
-	local cellsProps = {
-		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(12, 48),
-		Size = UDim2.new(1, -24, 0, cellHeight),
-		ZIndex = 81,
-	}
-	if mobile then
-		cellsProps.CanvasSize = UDim2.fromOffset(0, 7 * 48)
-		cellsProps.ScrollBarThickness = 6
-		cellsProps.ScrollingDirection = Enum.ScrollingDirection.Y
-		cellsProps.ClipsDescendants = true
-	end
-	return HudPrimitives.createPanel({ AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(width, panelHeight), ZIndex = 80 }, {
-		Title = HudPrimitives.createLabel("Daily Rewards", { Position = UDim2.fromOffset(14, 12), Size = UDim2.new(1, -28, 0, 24), TextSize = 20, ZIndex = 81 }),
-		Cells = React.createElement(if mobile then "ScrollingFrame" else "Frame", cellsProps, cells),
-		Claim = HudPrimitives.createButton(if daily.IsClaimedToday then "Claimed" else "Claim", { Position = UDim2.new(1, -124, 1, -54), Size = UDim2.fromOffset(108, 44), Active = daily.CanClaim == true, ZIndex = 82, [React.Event.Activated] = function() if daily.CanClaim then props.OnClaim(daily.DayIndex) end end }),
-		Close = HudPrimitives.createButton("Close", { Position = UDim2.fromOffset(14, panelHeight - 54), Size = UDim2.fromOffset(86, 44), ZIndex = 82, [React.Event.Activated] = props.OnClose }),
-	})
+	local height = if mobile then math.min(560, math.max(360, viewport.Y - 32)) else 300
+	return Kit.modal({ Title = "Daily Rewards", BackgroundId = "RitualCore", MaximumWidth = 620, MaximumHeight = height, ViewportSize = viewport, ZIndex = 80, OnClose = props.OnClose, Children = {
+		Icon = Kit.icon("RitualCore", { Position = UDim2.new(1, -96, 0, 20), Size = UDim2.fromOffset(36, 36), ZIndex = 82 }),
+		Hint = Kit.label(if daily.IsClaimedToday then "Today's blessing is already claimed." else "Return each day to build a seven-day streak.", { Position = UDim2.fromOffset(22, 78), Size = UDim2.new(1, -44, 0, 32), TextColor3 = C.Muted, TextSize = 14, ZIndex = 82 }),
+		Days = React.createElement(if mobile then "ScrollingFrame" else "Frame", { Active = mobile, AutomaticCanvasSize = if mobile then Enum.AutomaticSize.Y else Enum.AutomaticSize.None, BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(), Position = UDim2.fromOffset(22, 118), ScrollBarThickness = 5, Size = UDim2.new(1, -44, 0, if mobile then height - 194 else 86), ZIndex = 82 }, cells),
+		CloseAction = Kit.button("Close", { Position = UDim2.fromOffset(22, height - 62), Size = UDim2.fromOffset(108, 44), ZIndex = 83, [React.Event.Activated] = props.OnClose }),
+		Claim = Kit.button(if daily.IsClaimedToday then "Claimed" else "Claim Reward", { Active = daily.CanClaim == true, BackgroundColor3 = if daily.CanClaim then C.Action else C.Locked, Position = UDim2.new(1, -166, 1, -62), Size = UDim2.fromOffset(144, 44), ZIndex = 83, [React.Event.Activated] = if daily.CanClaim then function() props.OnClaim(daily.DayIndex) end else nil }),
+	}})
 end
 
 return DailyRewardOverlay
