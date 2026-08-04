@@ -585,6 +585,10 @@ local function collectCrystalRewardWithRush(profile, stats)
 	local rushPointsAwarded = 0
 
 	if breakResult.Finalized then
+		recordRetentionEvent(profile, "online_crystal_break", 1)
+		if (breakResult.RuneLevelsGained or 0) > 0 then
+			recordRetentionEvent(profile, "stone_or_rune_upgrade", breakResult.RuneLevelsGained)
+		end
 		rushPointsAwarded = awardCrystalBreakRush(profile, 1, breakResult.RuneLevelsGained or 0)
 		queueCapacityFullTransition(profile, wasFull)
 	end
