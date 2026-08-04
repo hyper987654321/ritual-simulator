@@ -39,7 +39,6 @@ function Kit.modal(props)
 	local children = props.Children or {}
 	children.Background = React.createElement("ImageLabel", { BackgroundColor3 = C.Panel, BackgroundTransparency = if UIBackgroundConfig.getBackground(props.BackgroundId) ~= "" then 0.12 else 0, BorderSizePixel = 0, ClipsDescendants = true, Image = UIBackgroundConfig.getBackground(props.BackgroundId) or "", ImageTransparency = 0.18, ScaleType = Enum.ScaleType.Crop, Size = UDim2.fromScale(1, 1), ZIndex = z }, { Corner = corner(18) })
 	children.Title = Kit.label(props.Title, { Position = UDim2.fromOffset(22, 18), Size = UDim2.new(1, -92, 0, 38), TextSize = if mobile then 23 else 28, ZIndex = z + 2 })
-	children.Close = Kit.button("×", { AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1, Position = UDim2.new(1, -10, 0, 10), Size = UDim2.fromOffset(44, 44), TextColor3 = C.Muted, TextSize = 28, ZIndex = z + 3, [React.Event.Activated] = props.OnClose })
 	children.Rule = React.createElement("Frame", { BackgroundColor3 = C.Accent, BorderSizePixel = 0, Position = UDim2.fromOffset(22, 62), Size = UDim2.new(1, -44, 0, 2), ZIndex = z + 2 })
 	children.Close = React.createElement("ImageButton", {
 		Active = true,
