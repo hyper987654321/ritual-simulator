@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "game_id": "ritual-simulator-v1",
+  "local_only": true,
+  "upload_performed": false,
+  "files": [
+    {
+      "path": "assets/presentation/sounds/pet_roll_reveal.wav",
+      "logical_uri": "rbxasset://sounds/ritual-simulator/pet_roll_reveal.wav",
+      "bytes": 26924,
+      "sha256": "a3e290d2d7b957f2bb27e33c6618b771999fc3f6c5dde70297517819dc60e194",
+      "provenance": "sound-pet-roll artifact pet_roll_reveal, deterministic seed 123",
+      "validation": "producer-validated WAV; local Studio handoff",
+      "review_state": "staged"
+    },
+    {
+      "path": "assets/presentation/sounds/zone_unlocked.wav",
+      "logical_uri": "rbxasset://sounds/ritual-simulator/zone_unlocked.wav",
+      "bytes": 78764,
+      "sha256": "e83c248ad1c9148b0b7103e7ca017947edab83346f1e8b19a3bf200fd403482c",
+      "provenance": "sound-zone-unlocked artifact zone_unlocked, deterministic seed 123",
+      "validation": "producer-validated WAV; local Studio handoff",
+      "review_state": "staged"
+    },
+    {
+      "path": "assets/presentation/vfx/ritual_pet_roll_reveal/textures/release_ring.png",
+      "logical_uri": "rbxasset://textures/ritual-simulator/vfx/release_ring.png",
+      "bytes": 22940,
+      "sha256": "d9a89f11b5db8df82ac76aac11fd9e2fe1e74e66c87120b1da9db831205cc27b",
+      "provenance": "compiled ritual_pet_roll_reveal VFX package, texture key release_ring",
+      "validation": "compiled package hash match; local Studio handoff",
+      "review_state": "staged"
+    },
+    {
+      "path": "assets/presentation/vfx/ritual_pet_roll_reveal/textures/seal_ribbon.png",
+      "logical_uri": "rbxasset://textures/ritual-simulator/vfx/seal_ribbon.png",
+      "bytes": 651,
+      "sha256": "0b527ce6ffc82d2730a32d6927aeb459c911305a23cd2b558d2e2d03aec6bbec",
+      "provenance": "compiled ritual_pet_roll_reveal VFX package, texture key seal_ribbon",
+      "validation": "compiled package hash match; local Studio handoff",
+      "review_state": "staged"
+    },
+    {
+      "path": "assets/presentation/vfx/ritual_pet_roll_reveal/textures/spirit_core_flipbook.png",
+      "logical_uri": "rbxasset://textures/ritual-simulator/vfx/spirit_core_flipbook.png",
+      "bytes": 979715,
+      "sha256": "ebb3d929822e2eb1777927b04a50ef42b78ffc18a348770370da7ed42f28e629",
+      "provenance": "compiled ritual_pet_roll_reveal VFX package, texture key spirit_core_flipbook",
+      "validation": "compiled package hash match; local Studio handoff",
+      "review_state": "staged"
+    },
+    {
+      "path": "assets/presentation/vfx/ritual_pet_roll_reveal/textures/spirit_wisp_flipbook.png",
+      "logical_uri": "rbxasset://textures/ritual-simulator/vfx/spirit_wisp_flipbook.png",
+      "bytes": 573669,
+      "sha256": "d384f400c21002ef22ca6382fb9e4f6616e93901a9a8e3e304582a2d674ff4ba",
+      "provenance": "compiled ritual_pet_roll_reveal VFX package, texture key spirit_wisp_flipbook",
+      "validation": "compiled package hash match; local Studio handoff",
+      "review_state": "staged"
+    }
+  ],
+  "vfx": {
+    "effect_id": "ritual_pet_roll_reveal",
+    "compiled_fingerprint": "blake3:3fa75568c7efb3f8e00833499021b41b9427c5077fe2b8964b9c047eac28132c",
+    "definition": "src/client/Systems/Presentation/PetRollRevealDefinition.luau",
+    "definition_adaptation": "trusted Studio-local texture URI prefix only; unresolved texture fallback retained"
+  }
+}
