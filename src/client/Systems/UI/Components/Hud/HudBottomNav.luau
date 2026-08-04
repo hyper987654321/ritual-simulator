@@ -89,7 +89,7 @@ end
 
 function HudBottomNav.create(props)
 	local resolved = props or {}
-	local menuOpen, setMenuOpen = React.useState(false)
+	local menuOpen = resolved.MenuOpen == true
 	local viewport = resolved.ViewportSize or Vector2.new(1280, 720)
 	local width = math.min(viewport.X - 20, 470)
 	local scale = math.clamp(math.min(viewport.Y / 760, 1), 0.82, 1)
@@ -110,7 +110,7 @@ function HudBottomNav.create(props)
 		{ Label = "Roll", IconId = "RollDice", Order = 2, Width = primaryWidth, Activated = resolved.OnRoll },
 		{ Label = "Ritual", IconId = "RitualCore", Order = 3, Width = normalWidth, Activated = resolved.OnRitual },
 		{ Label = "Zones", IconId = "Teleporter", Order = 4, Width = normalWidth, Activated = resolved.OnZones },
-		{ Label = "More", IconId = "Shop", Order = 5, Width = normalWidth, Activated = function() setMenuOpen(not menuOpen) end },
+		{ Label = "More", IconId = "Shop", Order = 5, Width = normalWidth, Activated = resolved.OnToggleMore },
 	}
 	if resolved.RollOnly == true then
 		controls = {
