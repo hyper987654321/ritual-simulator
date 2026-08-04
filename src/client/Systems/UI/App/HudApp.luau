@@ -197,6 +197,7 @@ end
 local function HudApp()
 	local snapshot, setSnapshot = React.useState(ClientStateStore.getSnapshot())
 	local feedback, setFeedback = React.useState(ClientStateStore.getFeedback())
+	local purchaseStatus, setPurchaseStatus = React.useState(ProductPurchaseController.getLastResult())
 	local rollActions = useRollActions({
 		BuildRollRouletteTrack = RollScreenOverlay.buildRollRouletteTrack,
 		GetRollAnimationDurationScale = RollScreenOverlay.getRollAnimationDurationScale,
@@ -226,6 +227,12 @@ local function HudApp()
 	React.useEffect(function()
 		return ClientStateStore.subscribeFeedback(function(nextFeedback)
 			setFeedback(nextFeedback)
+		end)
+	end, {})
+
+	React.useEffect(function()
+		return ProductPurchaseController.subscribe(function(result)
+			setPurchaseStatus(result)
 		end)
 	end, {})
 
@@ -582,6 +589,7 @@ local function HudApp()
 		ShopOverlay = if activeOverlay == SHOP_OVERLAY_ID and not rollScreenVisible
 			then ShopOverlay.create({
 				OnProductActivated = promptProduct,
+				PurchaseStatus = purchaseStatus,
 				Snapshot = snapshot,
 				OnBuyPotion = buyPotionWithGems,
 				OnClose = closeOverlay,
@@ -657,10 +665,10 @@ local function HudApp()
 			else nil,
 
 		RetentionOverlay = if activeOverlay == RETENTION_OVERLAY_ID and not rollScreenVisible
-			then RetentionOverlay.create({ Snapshot = snapshot, OnClaim = claimRetention, OnClose = closeOverlay }) else nil,
+			then RetentionOverlay.create({ Snapshot = snapshot, OnClaim = claimRetention, OnClose = closeOverlay, ViewportSize = viewportSize }) else nil,
 
 		LeaderboardOverlay = if activeOverlay == LEADERBOARD_OVERLAY_ID and not rollScreenVisible
-			then LeaderboardOverlay.create({ Snapshot = snapshot, OnClose = closeOverlay }) else nil,
+			then LeaderboardOverlay.create({ Snapshot = snapshot, OnClose = closeOverlay, ViewportSize = viewportSize }) else nil,
 
 		SocialOverlay = if activeOverlay == SOCIAL_OVERLAY_ID and not rollScreenVisible
 			then SocialOverlay.create({ Snapshot = snapshot, OnClose = closeOverlay, ViewportSize = viewportSize }) else nil,

@@ -46,6 +46,7 @@ local SNAPSHOT_SECTION_KEYS = {
 	EquippedPets = true,
 	MaxEquippedPets = true,
 	RitualPower = true,
+	Leaderboards = true,
 
 	-- Transitional snapshot aliases remain accepted until every publisher removes them.
 	RebirthRequirement = true,

@@ -291,6 +291,17 @@ local function processAction(player, actionName, payload)
 		end
 	end
 
+	if actionName == Network.Actions.SetPetEquippedCount
+		or actionName == Network.Actions.UnequipPet
+		or actionName == Network.Actions.EquipBestPets
+	then
+		local petRateLimitedResponse = getRateLimitedResponse(player, "PetInventory", FEATURE_RATE_LIMIT)
+
+		if petRateLimitedResponse ~= nil then
+			return petRateLimitedResponse
+		end
+	end
+
 	return PlayerStateService.withProfileLock(player, function()
 		local result = normalizeActionResult(handler(player, payload))
 

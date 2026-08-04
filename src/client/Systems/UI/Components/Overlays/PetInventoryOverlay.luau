@@ -9,6 +9,7 @@ local Util = Shared:WaitForChild("Util")
 
 local NumberFormatter = require(Util:WaitForChild("NumberFormatter"))
 local PetConfig = require(Config:WaitForChild("PetConfig"))
+local PetInventoryViewModel = require(script.Parent.Parent.Parent:WaitForChild("ViewModels"):WaitForChild("PetInventoryViewModel"))
 local UIIconConfig = require(Config:WaitForChild("UIIconConfig"))
 local UIThemeConfig = require(Config:WaitForChild("UIThemeConfig"))
 
@@ -445,6 +446,7 @@ local function PetTile(props)
 	local layoutOrder = props.LayoutOrder
 	local onHoverStart = props.OnHoverStart
 	local onHoverEnd = props.OnHoverEnd
+	local onActivated = props.OnActivated
 	local tileZIndex = 93
 	local hasPet = petStack ~= nil and (petStack.Count or 0) > 0
 	local pet = if hasPet then PetConfig.getPet(petStack.PetId) else nil
@@ -491,6 +493,9 @@ local function PetTile(props)
 				if onHoverEnd ~= nil then
 					onHoverEnd()
 				end
+			end else nil,
+			[React.Event.Activated] = if hasPet and onActivated ~= nil then function()
+				onActivated(petStack.PetId)
 			end else nil,
 		}, {
 			Corner = createCorner(8),
@@ -551,7 +556,7 @@ local function PetTile(props)
 	}, children)
 end
 
-local function createPetTile(petStack, layoutOrder, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+local function createPetTile(petStack, layoutOrder, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd, onActivated)
 	return React.createElement(PetTile, {
 		HasAuthoritativeOdds = hasAuthoritativeOdds,
 		PetStack = petStack,
@@ -559,10 +564,11 @@ local function createPetTile(petStack, layoutOrder, oddsByPetId, hasAuthoritativ
 		OddsByPetId = oddsByPetId,
 		OnHoverStart = onHoverStart,
 		OnHoverEnd = onHoverEnd,
+		OnActivated = onActivated,
 	})
 end
 
-local function createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+local function createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd, onActivated)
 	local children = {
 		Padding = React.createElement("UIPadding", {
 			PaddingBottom = UDim.new(0, 10),
@@ -584,16 +590,17 @@ local function createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, 
 			oddsByPetId,
 			hasAuthoritativeOdds,
 			onHoverStart,
-			onHoverEnd
+			onHoverEnd,
+			onActivated
 		)
 	end
 
 	return children
 end
 
-local function createBestGrid(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+local function createBestGrid(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd, onActivated)
 	local children = if #petStacks > 0
-		then createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+		then createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd, onActivated)
 		else {
 		Empty = createEmptyText(),
 	}
@@ -607,9 +614,9 @@ local function createBestGrid(petStacks, oddsByPetId, hasAuthoritativeOdds, onHo
 	}, children)
 end
 
-local function createStoredGrid(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+local function createStoredGrid(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd, onActivated)
 	local children = if #petStacks > 0
-		then createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd)
+		then createGridChildren(petStacks, oddsByPetId, hasAuthoritativeOdds, onHoverStart, onHoverEnd, onActivated)
 		else {
 		Empty = createEmptyText(),
 	}
@@ -633,6 +640,10 @@ local function PetInventoryOverlayComponent(props)
 	local snapshot = resolvedProps.Snapshot
 	local contentRef = React.useRef(nil)
 	local hoveredPet, setHoveredPet = React.useState(nil)
+	local filterText, setFilterText = React.useState("")
+	local sortBy, setSortBy = React.useState("Power")
+	local descending, setDescending = React.useState(true)
+	local selectedPetId, setSelectedPetId = React.useState(nil)
 
 	if snapshot == nil then
 		return nil
@@ -640,8 +651,20 @@ local function PetInventoryOverlayComponent(props)
 
 	local maxEquippedPets = snapshot.MaxEquippedPets or PetConfig.MAX_EQUIPPED
 	local oddsByPetId, hasAuthoritativeOdds = getAdjustedOddsByPetId(snapshot)
+	local viewportSize = resolvedProps.ViewportSize or Vector2.new(1280, 720)
+	local inventoryModel = PetInventoryViewModel.build(snapshot, {
+		FilterText = filterText,
+		SortBy = sortBy,
+		Descending = descending,
+		SelectedPetId = selectedPetId,
+		IsMobile = viewportSize.X < 700,
+	})
 	local bestPetStacks = getBestPetStacks(snapshot, oddsByPetId, hasAuthoritativeOdds)
-	local storedPetStacks = getStoredPetStacks(snapshot, oddsByPetId, hasAuthoritativeOdds)
+	local storedPetStacks = {}
+	for _, item in ipairs(inventoryModel.Items) do
+		table.insert(storedPetStacks, { PetId = item.PetId, Count = item.Count, EquippedCount = item.EquippedCount, StoredCount = item.StoredCount, BasePower = item.Power, Power = item.Power })
+	end
+	local selectedItem = inventoryModel.SelectedItem
 	local contentChildren = {}
 
 	local function showTooltip(petStack, pet, petOddsText, powerText, guiObject)
@@ -661,6 +684,16 @@ local function PetInventoryOverlayComponent(props)
 
 	local function hideTooltip()
 		setHoveredPet(nil)
+	end
+
+	local function selectPet(petId)
+		setSelectedPetId(petId)
+	end
+
+	local function changeSort()
+		local nextSort = if sortBy == "Power" then "Name" elseif sortBy == "Name" then "Rarity" else "Power"
+		setSortBy(nextSort)
+		setDescending(nextSort ~= "Name")
 	end
 
 	contentChildren.BestPetsTitle = createLabel(string.format(
@@ -692,13 +725,32 @@ local function PetInventoryOverlayComponent(props)
 		[React.Event.Activated] = resolvedProps.OnEquipBest,
 		ZIndex = 98,
 	})
+	contentChildren.Search = React.createElement("TextBox", {
+		BackgroundColor3 = Color3.fromRGB(245, 245, 250), BorderSizePixel = 0, ClearTextOnFocus = false,
+		PlaceholderText = "Search pets", Position = UDim2.fromOffset(10, 0), Size = UDim2.fromOffset(160, 44),
+		Text = filterText, TextColor3 = Color3.fromRGB(35, 35, 43), TextSize = 14,
+		[React.Change.Text] = function(instance) setFilterText(instance.Text) end, ZIndex = 98,
+	})
+	contentChildren.Sort = React.createElement("TextButton", {
+		Active = true, BackgroundColor3 = Color3.fromRGB(80, 112, 165), BorderSizePixel = 0,
+		Position = UDim2.fromOffset(178, 0), Size = UDim2.fromOffset(110, 44), Font = UIThemeConfig.Font,
+		Text = "Sort: " .. sortBy, TextColor3 = Color3.new(1, 1, 1), TextSize = 13,
+		[React.Event.Activated] = changeSort, ZIndex = 98,
+	})
+	contentChildren.Selected = createLabel("Selected: " .. (selectedItem and (selectedItem.DisplayName .. " x" .. tostring(selectedItem.EquippedCount)) or "none"), {
+		Position = UDim2.fromOffset(300, 0), Size = UDim2.fromOffset(180, 44), TextSize = 13, ZIndex = 98,
+	})
+	contentChildren.Plus = React.createElement("TextButton", { Active = selectedItem ~= nil, BackgroundColor3 = Color3.fromRGB(62, 176, 106), BorderSizePixel = 0, Position = UDim2.fromOffset(482, 0), Size = UDim2.fromOffset(44, 44), Font = UIThemeConfig.Font, Text = "+", TextColor3 = Color3.new(1, 1, 1), TextSize = 20, [React.Event.Activated] = if selectedItem then function() resolvedProps.OnSetEquippedCount(selectedItem.PetId, selectedItem.EquippedCount + 1) end else nil, ZIndex = 98 })
+	contentChildren.Minus = React.createElement("TextButton", { Active = selectedItem ~= nil, BackgroundColor3 = Color3.fromRGB(165, 91, 91), BorderSizePixel = 0, Position = UDim2.fromOffset(530, 0), Size = UDim2.fromOffset(44, 44), Font = UIThemeConfig.Font, Text = "-", TextColor3 = Color3.new(1, 1, 1), TextSize = 20, [React.Event.Activated] = if selectedItem then function() resolvedProps.OnSetEquippedCount(selectedItem.PetId, math.max(0, selectedItem.EquippedCount - 1)) end else nil, ZIndex = 98 })
+	contentChildren.Unequip = React.createElement("TextButton", { Active = selectedItem ~= nil, BackgroundColor3 = Color3.fromRGB(75, 79, 96), BorderSizePixel = 0, Position = UDim2.fromOffset(578, 0), Size = UDim2.fromOffset(92, 44), Font = UIThemeConfig.Font, Text = "Unequip", TextColor3 = Color3.new(1, 1, 1), TextSize = 13, [React.Event.Activated] = if selectedItem then function() resolvedProps.OnUnequip(selectedItem.PetId) end else nil, ZIndex = 98 })
 
 	contentChildren.BestGrid = createBestGrid(
 		bestPetStacks,
 		oddsByPetId,
 		hasAuthoritativeOdds,
 		showTooltip,
-		hideTooltip
+		hideTooltip,
+		selectPet
 	)
 	contentChildren.Divider = React.createElement("Frame", {
 		BackgroundColor3 = Color3.fromRGB(225, 225, 225),
@@ -721,7 +773,8 @@ local function PetInventoryOverlayComponent(props)
 		oddsByPetId,
 		hasAuthoritativeOdds,
 		showTooltip,
-		hideTooltip
+		hideTooltip,
+		selectPet
 	)
 
 	if hoveredPet ~= nil then

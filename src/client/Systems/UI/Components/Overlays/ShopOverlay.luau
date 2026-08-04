@@ -21,7 +21,7 @@ local GameOverlay = require(CommonComponents:WaitForChild("GameOverlay"))
 local ShopOverlay = {}
 
 local OVERLAY_SIZE = UDim2.fromScale(0.58, 0.72)
-local DESIGN_CONTENT_SIZE = Vector2.new(620, 470)
+local DESIGN_CONTENT_SIZE = Vector2.new(620, 650)
 local TEXT_COLOR = Color3.fromRGB(35, 35, 43)
 local MUTED_TEXT_COLOR = Color3.fromRGB(92, 88, 101)
 local GEM_COLOR = Color3.fromRGB(255, 74, 214)
@@ -485,19 +485,34 @@ local function createCardRow(items, yPosition)
 	}, children)
 end
 
-local function createBalancePanel(snapshot)
+local function getPurchaseStatusText(status)
+	if typeof(status) ~= "table" then return "" end
+	local names = {
+		prompted = "Purchase prompt opened.",
+		completed = "Prompt completed; receipt pending.",
+		cancelled = "Purchase cancelled.",
+		local_unavailable = "This offer is unavailable right now.",
+		prompt_failed = "Purchase prompt failed.",
+		busy = "Another purchase prompt is busy.",
+	}
+	return names[status.Status] or ""
+end
+
+local function createBalancePanel(snapshot, purchaseStatus)
 	local ritualGems = if snapshot ~= nil then snapshot.RitualGems or 0 else 0
 
+	local statusText = getPurchaseStatusText(purchaseStatus)
 	return React.createElement("Frame", {
 		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
 		BackgroundTransparency = 0.06,
 		BorderSizePixel = 0,
 		Position = UDim2.fromOffset(36, 28),
-		Size = UDim2.new(1, -72, 0, 58),
+		Size = UDim2.new(1, -72, 0, 84),
 		ZIndex = 96,
 	}, {
 		Corner = createCorner(8),
 		Stroke = createBorder(3, 0.08),
+		Status = if statusText ~= "" then createLabel(statusText, { Position = UDim2.fromOffset(20, 58), Size = UDim2.new(1, -40, 0, 24), TextColor3 = Color3.fromRGB(82, 118, 166), TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 98 }) else nil,
 		Row = React.createElement("Frame", {
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundTransparency = 1,
@@ -549,7 +564,7 @@ local function getProductCards(sectionId, onProductActivated)
 	local cards = {}
 
 	for index, product in ipairs(ShopProductConfig.getSectionProducts(sectionId)) do
-		local robloxProductId = ShopProductConfig.getRobloxProductId(product)
+		local robloxProductId = if product.ShopProductId == "boost_luck_2x_15m" then nil else ShopProductConfig.getRobloxProductId(product)
 
 		cards[index] = {
 			ShopProductId = product.ShopProductId,
@@ -571,6 +586,7 @@ function ShopOverlay.create(props)
 	local onProductActivated = resolvedProps.OnProductActivated
 	local onBuyPotion = resolvedProps.OnBuyPotion
 	local onUsePotion = resolvedProps.OnUsePotion
+	local purchaseStatus = resolvedProps.PurchaseStatus
 	local gemSection = ShopProductConfig.getSection(ShopProductConfig.SectionIds.GemPacks)
 
 	return GameOverlay.create({
@@ -586,13 +602,16 @@ function ShopOverlay.create(props)
 		ViewportSize = resolvedProps.ViewportSize,
 		ZIndex = resolvedProps.ZIndex,
 		Children = {
-			Balance = createBalancePanel(snapshot),
+			Balance = createBalancePanel(snapshot, purchaseStatus),
 			GemTitle = createSectionTitle((gemSection and gemSection.DisplayName) or "Gems", 102),
 			GemDivider = createDivider(136),
 			Gems = createCardRow(getProductCards(ShopProductConfig.SectionIds.GemPacks, onProductActivated), 154),
-			OfferTitle = createSectionTitle("Potions", 286),
-			OfferDivider = createDivider(320),
-			Offers = createPotionRow(snapshot, onBuyPotion, onUsePotion, 338),
+			FeaturedTitle = createSectionTitle("Featured", 286),
+			FeaturedDivider = createDivider(320),
+			Featured = createCardRow(getProductCards(ShopProductConfig.SectionIds.Featured, onProductActivated), 326),
+			OfferTitle = createSectionTitle("Potions", 458),
+			OfferDivider = createDivider(492),
+			Offers = createPotionRow(snapshot, onBuyPotion, onUsePotion, 510),
 		},
 	})
 end

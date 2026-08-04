@@ -14,9 +14,12 @@ local SocialPresenceService = require(Systems:WaitForChild("Social"):WaitForChil
 local Network = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Net"):WaitForChild("Network"))
 
 PetModelReplicationService.start()
+local playerStateUpdated = Network.getRemoteEvent(Network.RemoteEvents.PlayerStateUpdated)
 PlayerStateService.start()
 LeaderboardService.setRecordProvider(PlayerStateService.getCurrentLeaderboardRecords)
-local playerStateUpdated = Network.getRemoteEvent(Network.RemoteEvents.PlayerStateUpdated)
+LeaderboardService.setPublicationProvider(function(player)
+	SnapshotPublisher.publishPlayerStateUpdate(player, playerStateUpdated, { Leaderboards = true })
+end)
 local socialPresenceService = SocialPresenceService.new({
 	getProfile = PlayerStateService.getProfile,
 	isProfileReady = PlayerStateService.isCurrentProfile,

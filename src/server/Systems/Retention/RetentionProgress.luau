@@ -57,6 +57,13 @@ local function copyReward(reward)
 	return if typeof(reward) == "table" then table.clone(reward) else {}
 end
 
+local function rewardText(reward)
+	if typeof(reward) ~= "table" then return "Reward unavailable" end
+	if typeof(reward.RitualGems) == "number" then return tostring(reward.RitualGems) .. " Ritual Gems" end
+	if typeof(reward.PotionId) == "string" then return "1 " .. string.gsub(reward.PotionId, "_", " ") end
+	return "Reward unavailable"
+end
+
 local function applyReward(profile, reward)
 	if typeof(reward) ~= "table" then
 		return false
@@ -202,14 +209,14 @@ function RetentionProgress.buildSnapshot(profile, serverNowUnix)
 	for _, id in ipairs(RetentionConfig.DeedOrder) do
 		local definition = RetentionConfig.Deeds[id]
 		local progress = safeInteger(state.DailyProgress[id], 0, definition.Requirement, 0)
-		local card = { Id = id, Progress = progress, Requirement = definition.Requirement, Claimed = state.DailyClaimed[id] == true, Reward = copyReward(definition.Reward) }
+		local card = { Id = id, Label = definition.Label, Description = definition.Description, Progress = progress, Requirement = definition.Requirement, Claimed = state.DailyClaimed[id] == true, Reward = copyReward(definition.Reward), RewardText = rewardText(definition.Reward) }
 		card.Ready = not card.Claimed and progress >= card.Requirement
 		if card.Ready then snapshot.ReadyCount += 1 end
 		table.insert(snapshot.Deeds, card)
 	end
 	for _, id in ipairs(RetentionConfig.PlaytimeOrder) do
 		local definition = RetentionConfig.PlaytimeMilestones[id]
-		local card = { Id = id, Progress = math.min(state.ActiveSecondsToday, definition.ActiveSeconds), Requirement = definition.ActiveSeconds, Claimed = state.PlaytimeClaimed[id] == true, Reward = copyReward(definition.Reward) }
+		local card = { Id = id, Label = definition.Label, Description = definition.Description, Progress = math.min(state.ActiveSecondsToday, definition.ActiveSeconds), Requirement = definition.ActiveSeconds, Claimed = state.PlaytimeClaimed[id] == true, Reward = copyReward(definition.Reward), RewardText = rewardText(definition.Reward) }
 		card.Ready = not card.Claimed and state.ActiveSecondsToday >= card.Requirement
 		if card.Ready then snapshot.ReadyCount += 1 end
 		table.insert(snapshot.Playtime, card)
@@ -217,7 +224,7 @@ function RetentionProgress.buildSnapshot(profile, serverNowUnix)
 	for _, id in ipairs(RetentionConfig.AchievementOrder) do
 		local definition = RetentionConfig.Achievements[id]
 		local progress = math.min(definition.Threshold, achievementProgress(profile, definition))
-		local card = { Id = id, Progress = progress, Requirement = definition.Threshold, Claimed = state.AchievementClaimed[id] == true, Reward = copyReward(definition.Reward) }
+		local card = { Id = id, Label = definition.Label, Description = definition.Description, Progress = progress, Requirement = definition.Threshold, Claimed = state.AchievementClaimed[id] == true, Reward = copyReward(definition.Reward), RewardText = rewardText(definition.Reward) }
 		card.Ready = not card.Claimed and progress >= card.Requirement
 		if card.Ready then snapshot.ReadyCount += 1 end
 		table.insert(snapshot.Achievements, card)

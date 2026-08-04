@@ -56,6 +56,7 @@ PlayerDerivedState.PlayerStateSectionAllowlist = {
 	EquippedPets = true,
 	MaxEquippedPets = true,
 	RitualPower = true,
+	Leaderboards = true,
 	-- Transitional snapshot aliases remain explicitly allowlisted while known
 	-- clients migrate to their canonical roots.
 	RebirthRequirement = true,

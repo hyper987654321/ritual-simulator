@@ -10,9 +10,15 @@ local BOARD_FOLDER_NAME = "GeneratedLeaderboards"
 
 local hasStarted = false
 local recordProvider = nil
+local publicationProvider = nil
+local lastSignature = nil
 
 function LeaderboardService.setRecordProvider(provider)
 	recordProvider = provider
+end
+
+function LeaderboardService.setPublicationProvider(provider)
+	publicationProvider = provider
 end
 
 function LeaderboardService.getSnapshot()
@@ -22,6 +28,32 @@ function LeaderboardService.getSnapshot()
 		table.insert(snapshot.Boards, CurrentServerLeaderboard.get(boardId, records, os.clock(), false))
 	end
 	return snapshot
+end
+
+local function getSignature(snapshot)
+	local parts = {}
+	for _, board in ipairs(snapshot.Boards or {}) do
+		table.insert(parts, tostring(board.BoardId))
+		for _, row in ipairs(board.Rows or {}) do
+			table.insert(parts, tostring(row.UserId) .. ":" .. tostring(row.Value) .. ":" .. tostring(row.Rank))
+		end
+	end
+	return table.concat(parts, "|")
+end
+
+function LeaderboardService.publishIfChanged(force)
+	local snapshot = LeaderboardService.getSnapshot()
+	local signature = getSignature(snapshot)
+	if not force and signature == lastSignature then return false end
+	lastSignature = signature
+	if typeof(publicationProvider) == "function" then
+		for _, record in ipairs(if typeof(recordProvider) == "function" then recordProvider() else {}) do
+			if typeof(record) == "table" and record.Player ~= nil then
+				publicationProvider(record.Player)
+			end
+		end
+	end
+	return true
 end
 
 function LeaderboardService.start()
@@ -36,6 +68,13 @@ function LeaderboardService.start()
 	if existing ~= nil then
 		existing:Destroy()
 	end
+
+	task.spawn(function()
+		while hasStarted do
+			task.wait(5)
+			LeaderboardService.publishIfChanged(false)
+		end
+	end)
 end
 
 return LeaderboardService

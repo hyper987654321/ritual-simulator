@@ -585,10 +585,6 @@ local function collectCrystalRewardWithRush(profile, stats)
 	local rushPointsAwarded = 0
 
 	if breakResult.Finalized then
-		recordRetentionEvent(profile, "online_crystal_break", 1)
-		if (breakResult.RuneLevelsGained or 0) > 0 then
-			recordRetentionEvent(profile, "stone_or_rune_upgrade", breakResult.RuneLevelsGained)
-		end
 		rushPointsAwarded = awardCrystalBreakRush(profile, 1, breakResult.RuneLevelsGained or 0)
 		queueCapacityFullTransition(profile, wasFull)
 	end
@@ -1198,9 +1194,20 @@ end
 
 function PlayerStateService.getPlayerStateSections(player, expectedProfile, requestedSections)
 	local profile = resolveCurrentProfile(player, expectedProfile)
-	local sections = PlayerDerivedState.getPlayerStateSections(profile, requestedSections)
+	local derivedSections = requestedSections
+	if typeof(requestedSections) == "table" and requestedSections.Leaderboards == true then
+		derivedSections = table.clone(requestedSections)
+		derivedSections.Leaderboards = nil
+	end
+	local sections = PlayerDerivedState.getPlayerStateSections(profile, derivedSections)
+	if sections == nil and requestedSections.Leaderboards == true then
+		sections = {}
+	end
 	if sections ~= nil and sections.Social ~= nil and socialPresenceService ~= nil then
 		sections.Social = socialPresenceService:getSnapshot(player, profile)
+	end
+	if sections ~= nil and typeof(requestedSections) == "table" and requestedSections.Leaderboards == true then
+		sections.Leaderboards = LeaderboardService.getSnapshot()
 	end
 	return sections
 end
@@ -1359,6 +1366,12 @@ function PlayerStateService.processCrystalFarming(player)
 
 	local breakCount = farmingStep.BreakCount or 0
 	local runeLevelsGained = farmingStep.RuneLevelsGained or 0
+	if breakCount > 0 then
+		recordRetentionEvent(profile, "online_crystal_break", breakCount)
+	end
+	if runeLevelsGained > 0 then
+		recordRetentionEvent(profile, "stone_or_rune_upgrade", runeLevelsGained)
+	end
 	local autoCapacityLevelsBought = farmingStep.AutoCapacityLevelsBought or 0
 	local zoneUnlockEligibilityChanged = didLockedZoneUnlockEligibilityChange(
 		profile,
@@ -1379,6 +1392,7 @@ function PlayerStateService.processCrystalFarming(player)
 		dirtySections.RuneFocus = true
 		dirtySections.RitualRush = true
 		dirtySections.RitualPower = true
+		dirtySections.Retention = true
 	end
 
 	if autoCapacityLevelsBought > 0 then
@@ -1406,6 +1420,7 @@ function PlayerStateService.processCrystalFarming(player)
 		dirtySections.BestRitualPower = true
 		dirtySections.HighestCapacity = true
 		dirtySections.RitualPower = true
+		dirtySections.Retention = true
 	end
 
 	return {
@@ -1420,7 +1435,7 @@ function PlayerStateService.processCrystalFarming(player)
 		RuneLevelsGained = runeLevelsGained,
 		AutoCapacityLevelsBought = autoCapacityLevelsBought,
 		AutoCapacityEssenceSpent = farmingStep.AutoCapacityEssenceSpent or 0,
-		UsePlayerStateUpdated = autoCapacityLevelsBought > 0 or runeLevelsGained > 0,
+		UsePlayerStateUpdated = autoCapacityLevelsBought > 0 or runeLevelsGained > 0 or breakCount > 0,
 		DirtySections = dirtySections,
 	}
 end
