@@ -448,6 +448,11 @@ local function HudApp()
 		setActiveOverlay(function(currentOverlay) return if currentOverlay == RETENTION_OVERLAY_ID then nil else RETENTION_OVERLAY_ID end)
 	end
 
+	local function openDailyOverlay()
+		setMenuOpen(false)
+		setActiveOverlay(DAILY_OVERLAY_ID)
+	end
+
 	local function toggleLeaderboardOverlay()
 		setActiveOverlay(function(currentOverlay) return if currentOverlay == LEADERBOARD_OVERLAY_ID then nil else LEADERBOARD_OVERLAY_ID end)
 	end
@@ -617,18 +622,13 @@ local function HudApp()
 			OnRitual = toggleRitualCoreOverlay,
 			OnZones = toggleTeleportOverlay,
 			OnShop = toggleShopOverlay,
+			OnDaily = openDailyOverlay,
 			OnRitualRush = toggleRitualRushOverlay,
 			OnRebirth = toggleRebirthOverlay,
 			OnRetention = toggleRetentionOverlay,
 			OnLeaderboard = toggleLeaderboardOverlay,
 			OnSocial = toggleSocialOverlay,
-		}) else HudBottomNav.create({
-			MenuOpen = menuOpen,
-			OnToggleMore = toggleMoreMenu,
-			RollOnly = true,
-			ViewportSize = viewportSize,
-			OnRoll = activateRollScreen,
-		})
+		}) else nil
 
 	local function claimDaily(dayIndex)
 		runServerAction(function() return ClientStateStore.claimDailyReward(dayIndex) end)

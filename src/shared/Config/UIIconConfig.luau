@@ -1,28 +1,27 @@
-local UIAssetConfig = require(script.Parent:WaitForChild("UIAssetConfig"))
-
 local UIIconConfig = {}
 
 UIIconConfig.Icons = {
-	Shop = UIAssetConfig.resolveIcon("shop"),
-	RollDice = UIAssetConfig.resolveIcon("roll_dice"),
-	RitualCore = UIAssetConfig.resolveIcon("ritual_core"),
+	Shop = "", RollDice = "", RitualCore = "", Daily = "", Friends = "", Pets = "", Zones = "", More = "", Close = "",
 	AutoRoll = "",
 	AutoRollColored = "",
 	Rebirth = "",
-	PetInventory = UIAssetConfig.resolveIcon("pet_inventory"),
+	PetInventory = "",
 	Teleporter = "",
 	Essence = "",
-	Close = UIAssetConfig.resolveIcon("close"),
 	RollViewHidden = "",
 }
 
-UIIconConfig.IconOrder = {
-	"Shop", "RollDice", "RitualCore", "AutoRoll", "AutoRollColored", "Rebirth",
-	"PetInventory", "Teleporter", "Essence", "Close", "RollViewHidden",
+UIIconConfig.Glyphs = {
+	Shop = "¢", RollDice = "✦", RitualCore = "◈", Daily = "◷", Friends = "♧", Pets = "♢", Zones = "⌖", More = "•••", Close = "×",
+	AutoRoll = "↻", AutoRollColored = "↻", Rebirth = "↟", PetInventory = "♢", Teleporter = "⌖", Essence = "✧", RollViewHidden = "◌",
 }
 
 function UIIconConfig.getIcon(iconId)
 	return UIIconConfig.Icons[iconId]
+end
+
+function UIIconConfig.getGlyph(iconId)
+	return UIIconConfig.Glyphs[iconId] or "•"
 end
 
 return UIIconConfig
