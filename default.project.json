@@ -1,5 +1,5 @@
 {
-  "name": "simulator game",
+  "name": "Ritual Simulator",
   "tree": {
     "$className": "DataModel",
 
@@ -27,11 +27,13 @@
     },
 
     "Workspace": {
+      "$ignoreUnknownInstances": true,
       "$properties": {
         "FilteringEnabled": true
       }
     },
     "Lighting": {
+      "$ignoreUnknownInstances": true,
       "$properties": {
         "Ambient": [
           0,
@@ -45,6 +47,7 @@
       }
     },
     "SoundService": {
+      "$ignoreUnknownInstances": true,
       "$properties": {
         "RespectFilteringEnabled": true
       }
